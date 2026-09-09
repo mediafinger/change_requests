@@ -115,7 +115,6 @@ change_requests/
 │       ├── operations.rb                     # the collection: define, [], keys, verify!
 │       ├── operation.rb                      # one entry
 │       ├── operation/workflow.rb             # stage + quorum definitions
-│       ├── operation/payload_schema.rb
 │       ├── guards/                            # allowed? + reason, shared by commands AND presenters
 │       │   ├── base.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
 │       ├── commands/                          # guard + mutate + emit event, inside with_lock
@@ -133,7 +132,8 @@ change_requests/
 │       │   ├── collection_presenter.rb
 │       │   └── value/{action.rb,status.rb,stage_progress.rb,timeline_entry.rb}
 │       ├── notifications.rb                   # ActiveSupport::Notifications + config hooks
-│       ├── maintenance.rb                     # expire_stale!, reap_stuck_executions!, cancel_undeclared!
+│       ├── maintenance.rb                     # expire_stale!, reap_stuck_executions!, cancel_undeclared!,
+│       │                                     # close_due_stages!
 │       ├── actor.rb                           # the optional host-model concern
 │       │
 │       ├── engine.rb                          # ── LAYER 3: RAILS ── (required only if Rails::Engine)
@@ -201,7 +201,7 @@ version.
 |----------------|-----------------------------------------------------------------------------|
 | The collection | `ChangeRequests.operations` - an instance of `ChangeRequests::Operations`   |
 | One entry      | `ChangeRequests::Operation`, declared with `.define "members.update_roles"` |
-| Its parts      | `Operation::Workflow`, `Operation::PayloadSchema`                           |
+| Its parts      | `Operation::Workflow`                                                       |
 | Its key        | `operation_key` (column and API)                                            |
 | The target     | `op.service` + `op.method_name`                                             |
 | Its version    | `op.version`, snapshotted as `operation_version`                            |
@@ -718,9 +718,10 @@ from columns it already carries:
 
 - **Operation** - `service` and `method_name`, e.g. `Members::UpdateRoles.call`. Read from the request's own
   columns, so it renders identically for historical requests and for operations no longer declared.
-- **Payload preview** - the first `config.payload_preview_limit` (default 3) payload fields, in
-  **payload-schema declaration order** so the choice is deterministic rather than dependent on jsonb key
-  order. Each field renders its `payload_labels` value where one was declared, its raw value otherwise.
+- **Payload preview** - `config.payload_preview_limit` (default 3) payload fields, **ordered
+  alphabetically by key**. PostgreSQL `jsonb` does not preserve insertion order, so alphabetical is the only
+  ordering that is both deterministic and explicable. Each field renders its `payload_labels` value where
+  one was declared, its raw value otherwise.
 - **Full payload on demand** - the remaining fields expand in place, a `<details>` element with no
   JavaScript required.
 
@@ -799,11 +800,7 @@ ChangeRequests.operations.define "members.update_roles" do |op|
 
   op.service     = "Members::UpdateRoles"
   op.method_name = :call
-  op.payload_schema do |s|
-    s.uuid  :member_id, required: true
-    s.array :roles, of: :string, required: true, in: %w(owner admin editor viewer)
-  end
-  
+
   op.approvals permissions: %w(member_admin), required: 2 # who is allowed to approve and how many are necessary?
   
   # Labels will persist, even when the Objects are deleted, to keep a usable audit trail
@@ -1103,8 +1100,8 @@ it is worth saying what it buys:
    never from the strings stored on the row. Those columns become audit data, not dispatch input, and a request whose
    `operation_key` is no longer declared simply cannot run. `constantize` + `public_send` never sees a
    stored string, so the hole stays closed even if a careless endpoint lets someone write a row.
-2. **Payload validation at creation.** A typed schema checked when the request is made, rather than an
-   `ArgumentError` discovered weeks later by the person clicking Execute.
+2. **A stable dispatch target.** `service` and `method_name` are resolved and stored at creation, so what
+   a request will invoke is legible from the row itself, not only from live configuration.
 3. **Approval policy is policy, not caller input.** Thresholds, permissions and quorum structure come from
    the operation, which is why every `ChangeRequests.request!` call above is identical.
 4. **Snapshot-on-create.** The resolved workflow is frozen onto the request and materialised into stages and
@@ -1113,17 +1110,29 @@ it is worth saying what it buys:
 5. **Explicit retryability.** `idempotent` and `max_attempts` are per-action declarations, not an implicit
    "failed requests can be retried forever".
 6. **Boot-time verification.** `rake change_requests:verify` (and `to_prepare` in dev/test) asserts every
-   service constant resolves, every action is a public singleton method, every schema key is an accepted
-   keyword of that method, every quorum's threshold suits its rule, and no `all_quorums` stage is
-   unsatisfiable, and every operation declares a `version`. Verification checks the *singleton* method that
-   dispatch will actually call, so an ordinary `def self.call` target is validated against how it is
-   invoked.
+   service constant resolves, every operation declares a `version`, every quorum declares a positive
+   `threshold`, no `all_quorums` stage is unsatisfiable, and no `cooldown` is declared without ActiveJob.
+   Verification checks the *singleton* method that dispatch will actually call, so an ordinary
+   `def self.call` target is validated against how it is invoked.
 
 **The service contract, documented explicitly** (neither source documented it, and both broke on it):
 
 > A change-request target is a **public singleton method** that accepts **keyword arguments only** and whose
 > effect is either transactional or idempotent. It receives `idempotency_key:` if it declares that keyword -
 > the request id, stable across retries - so external calls can be deduplicated.
+
+**The payload is untyped.** It is stored as `jsonb` and dispatched as `**payload.symbolize_keys`, so the
+host's declared keys become keyword arguments. The gem validates only that it is a JSON object; matching it
+to the target's signature is the host's responsibility, and a mismatch surfaces as an `ArgumentError` at
+execution, recorded on the attempt and in the `execution_failed` event like any other target failure.
+
+Two consequences worth knowing before writing a payload:
+
+- **Symbolisation is top-level only.** Nested hashes keep string keys, because that is what round-trips
+  through `jsonb`. A target taking a nested structure should expect string keys inside it.
+- **jsonb normalises.** Key order is not preserved, duplicate keys collapse, and integers, floats, booleans
+  and null round-trip as themselves while symbols, dates and times do not - a `Date` goes in and a `String`
+  comes out. Serialise deliberately.
 
 Errors a host will actually rescue: `ChangeRequests::UnknownOperation`, `InvalidPayload`, `NotAuthorized`, and
 the `TransitionError` family (§8).
@@ -1201,7 +1210,7 @@ ChangeRequests::Error
 ├── ConfigurationError            (no actor types registered, invalid operation)
 ├── UnknownActorType              (an actor whose class is not registered)
 ├── UnknownOperation
-├── InvalidPayload                (=> details hash)
+├── InvalidPayload                (payload is not a JSON object)
 ├── NotAuthorized
 ├── TransitionError
 │   ├── NotApprovable  ├── NotUnapprovable  ├── NotRejectable
@@ -1251,6 +1260,11 @@ than zero requires ActiveJob - declaring one without it fails `verify!` with a `
 
 `CloseStageJob` re-evaluates on run rather than trusting its scheduling: it does nothing if the stage is no
 longer satisfied, and nothing if it is already closed. Duplicate or late jobs are therefore harmless.
+
+A *lost* job is not harmless - the stage would stay satisfied-but-open forever - so closing does not depend
+on the job alone. `Maintenance.close_due_stages!` closes any stage whose `satisfied_at + cooldown` has
+passed, on the same schedule as the other sweepers. The job is the fast path; the sweeper is the guarantee.
+This is the same pattern as the stuck-execution reaper (§8).
 
 **Unapprove** is permitted only while the actor's own stage is open - `pending`, or `satisfied` inside a
 cooldown window. It deletes the actor's approval row and its quorum links, emits `unapproved`, and re-runs
@@ -1331,6 +1345,8 @@ Additional guarantees:
 - **Expiry.** `Maintenance.expire_stale!` moves `pending`/`approved` requests past `expires_at` to `expired`.
 - **Undeclared operations.** `Maintenance.cancel_undeclared!` cancels non-final requests whose
   `operation_key` is no longer declared (§5.11).
+- **Due stages.** `Maintenance.close_due_stages!` closes satisfied stages whose cooldown has elapsed, so a
+  lost `CloseStageJob` cannot strand a request (§7.1).
 
 **Separation of duties** becomes explicit configuration rather than an accident:
 
@@ -1616,7 +1632,7 @@ p.actions              # [ Value::Action(name: :approve, label: "Approve", enabl
                        #                 confirm: "This bypasses 2 required approvals. Continue?") ]
 p.timeline             # ordered Value::TimelineEntry - one per event row, actor-labelled, i18n'd
 p.payload_fields       # honours config.payload_renderer when set
-p.as_json              # the full contract, stable and versioned
+p.as_json              # every value above, as a Hash
 ```
 
 Key properties:
@@ -1641,7 +1657,7 @@ Key properties:
 - **No ActionView dependency.** `routes:` is an optional injected url-helper object; when absent, `path` is
   nil and `as_json` still works. This keeps presenters in the domain core, usable from a host's own API
   controller or a background job.
-- **`as_json` is the documented public contract**, versioned in `docs/06_views_and_theming.md`. Any
+- **`as_json` is the documented public contract**, written out in `docs/06_views_and_theming.md`. Any
   alternative front end - Hotwire, React, Phlex, Avo - targets it.
 
 ## 12. Views
@@ -1917,8 +1933,8 @@ end
 ```
 
 That shared example asserts: the service constant resolves; the action is a public singleton method; every
-`payload_schema` key is an accepted keyword argument of that method; declared permissions are Strings that
-at least one registered actor type's `permissions` lambda can actually produce; `idempotent`/`max_attempts` are coherent (a
+declared permissions are Strings that at least one registered actor type's `permissions` lambda can
+actually produce; `idempotent`/`max_attempts` are coherent (a
 non-idempotent action may not declare `max_attempts > 1`); and, if the action declares
 `idempotency_key:`, that the method accepts it.
 
@@ -1967,13 +1983,14 @@ the README screenshots. It costs nothing extra and pays for itself the first aft
 Required areas:
 
 - models (validations, terminal-state guard, readonly attributes, event immutability)
-- operations (verification, payload schema, snapshotting, unknown-operation rejection)
+- operations (verification, materialise-on-create, unknown-operation rejection, non-object payload rejected)
 - guards (a truth table per guard × status × actor role - table-driven, one `where` per row)
 - commands (happy path, every guard rejection, event emission, workflow advancement)
 - workflow evaluation, §7.1 in full: quorum satisfaction, `any_quorum` / `all_quorums`, one-quorum-per-
   approval under `all_quorums`, stage closing with and without a cooldown, unapproval during the cooldown
-  window, refusal after closing, rejection short-circuiting, `only_record_rejections` - plus each of the
-  four §6.9 shapes end-to-end, since those are the examples in the docs and must not rot
+  window, refusal after closing, `close_due_stages!` closing a stage whose job never ran, rejection
+  short-circuiting, `only_record_rejections` - plus each of the four §6.9 shapes end-to-end, since those
+  are the examples in the docs and must not rot
 - names and labels (uniqueness within parent; i18n resolution with `humanize` fallback; null quorum name
   falling back to the stage label and omitting the event metadata key)
 - request labelling (payload preview honouring schema declaration order and `payload_preview_limit`;
@@ -1990,7 +2007,7 @@ Required areas:
 - override (refused when the action declares none; refused for the requester; refused without a reason when
   required; `overridden_at` set; the `overridden` event's shortfall snapshot matching the state *at claim
   time* and not being rewritten by a later approval)
-- presenters (actions match guards for every status × actor combination; `as_json` schema snapshot)
+- presenters (actions match guards for every status × actor combination; `as_json` key set and value types)
 - controllers/routes (opt-in route list, tenant scoping on **index and show**, error taxonomy → flash,
   Turbo and non-Turbo responses)
 - views (rendering, class contract, disabled-reason rendering, no raw UUIDs)
@@ -2053,7 +2070,7 @@ Plus a static check that no file under the domain directories mentions `ActionCo
 **Core**
 
 - Deferred, persisted, replayable invocation of a declared operation
-- Operations: dispatch allowlist, declared version, payload schema, payload labels, approval policy,
+- Operations: dispatch allowlist, declared version, payload labels, approval policy,
   retry policy,
   override policy, boot-time verification
 - Sequential stages of AND/OR-ed quorums, each quorum a threshold count; per-quorum permission matching
@@ -2099,29 +2116,50 @@ Phlex and ViewComponent renderer gems - an admin dashboard with metrics.
 
 ## 17. Milestones
 
-Sequenced so that each milestone is independently releasable and the risky work lands early. Estimates
-assume one experienced developer working from this plan.
+Sequenced so that each milestone is independently releasable and the risky work lands early. Larger
+milestones are split into parts that can be picked up separately. **Spec** names the sections that define
+the work; a part with no gap listed in §17.1 is ready to be broken into tickets from those sections alone.
+Estimates assume one experienced developer working from this plan.
 
-| #       | Version   | Scope                                                                                                                                                                                                                               | Effort |
-|---------|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
-| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec runtime deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **The seam is proven before any domain code exists.**                                  | 3–4 d  |
-| **M1**  | 0.2.0     | Migrations + all nine tables; statuses incl. `rejected`; terminal-state guard; readonly attrs; events; the §7.2 guard rules; commands (approve/unapprove/reject/cancel/comment); `with_lock`; single-stage, single-quorum workflow. | 6–8 d  |
-| **M2**  | 0.3.0     | Operations: allowlist, payload schema, workflow DSL, `op.version`, `op.cooldown`, materialise-on-create, `verify!`, `ChangeRequests.request!`, error taxonomy, `rake change_requests:verify`.                                       | 4–5 d  |
-| **M3**  | 0.4.0     | Execution: `executing` status, attempts, claim-then-invoke, idempotency tokens, retry ceiling, background mode, reaper, expiry sweeper. **Concurrency specs.**                                                                      | 4–5 d  |
-| **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`.                                                       | 2–3 d  |
-| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json` contract + schema snapshot spec.                                                                                                                                     | 3 d    |
-| **M6**  | 0.7.0     | Engine UI: base + requests controllers, routes, ERB partial set, helper module, i18n, optional stylesheet, pagination/filter/sort, Turbo-optional responses, `bin/demo`, view + request specs.                                      | 6–8 d  |
-| **M7**  | 0.8.0     | Generators (install, action, controller, views, scaffold_ui) + generator specs + the generate-on-a-real-app CI job.                                                                                                                 | 4 d    |
-| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`.                                                                                                                      | 3–4 d  |
-| **M9**  | 0.10.0    | Workflow evaluation (§7.1) in full: `any_quorum`/`all_quorums`, stage closing, the `cooldown` job, named approvers, the inbox query, UI stage/quorum progress.                                                                      | 5–7 d  |
-| **M10** | 0.11.0    | Notifications (`on_event`, `ActiveSupport::Notifications`), maintenance tasks.                                                                                                                                                      | 2–3 d  |
-| **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release.                                                                                                                                                | 4–5 d  |
+| #       | Version   | Scope                                                                                                                                                                        | Spec        | Effort |
+|---------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
+| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs                                          | §1, §2, §15 | 3–4 d  |
+| **M1a** |           | Migrations for all nine tables, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability                                                 | §4, §5      | 3–4 d  |
+| **M1b** | 0.2.0     | Guards and commands per the §7.2 table; `with_lock`; single-stage single-quorum evaluation; error taxonomy                                                                   | §7          | 3–4 d  |
+| **M2**  | 0.3.0     | Operations: allowlist, workflow DSL, `op.version`, `op.cooldown`, materialise-on-create, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`                 | §6.4, §6.12 | 3–4 d  |
+| **M3a** |           | Claim-then-invoke: `executing`, attempts table, conditional UPDATE, idempotency key, retry ceiling. **Concurrency specs.**                                                   | §8, §15.3   | 3 d    |
+| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                           | §8, §5.11   | 2 d    |
+| **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor` | §9          | 2–3 d  |
+| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                               | §11         | 3 d    |
+| **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination                                         | §12 Tier 1  | 3 d    |
+| **M6b** |           | Show page: stage/quorum progress, payload preview and expander, timeline, action buttons, override form                                                                      | §12 Tier 3  | 2–3 d  |
+| **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                | §12 Tier 2  | 2–3 d  |
+| **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                            | §13         | 4 d    |
+| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                | §14         | 3–4 d  |
+| **M9a** |           | Multi-quorum evaluation: `any_quorum` / `all_quorums`, approval→quorum linking, stage closing, named approvers                                                               | §7.1        | 3 d    |
+| **M9b** |           | `op.cooldown`: `CloseStageJob`, unapproval inside the window, `close_due_stages!` fallback                                                                                   | §7.1        | 1–2 d  |
+| **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                             | §5.3, §11   | 2 d    |
+| **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                              | §10         | 2–3 d  |
+| **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                          | -           | 4–5 d  |
 
 **Total: roughly 8-10 focused weeks**, or 4-5 months at one day a week.
 
-M9 lands late although the **schema supports it from M1**: the tables are cheap
-up front and expensive to retrofit, while the staged evaluation logic and UI can wait until the
-single-quorum path is exercised.
+M9 lands late although the **schema supports it from M1a**: the tables are cheap up front and expensive to
+retrofit, while the staged evaluation logic and UI can wait until the single-quorum path is exercised.
+
+### 17.1 Gaps to close before ticketing those parts
+
+Everything else in the table is specified well enough that tickets can be written from the referenced
+sections. These six are not, and each needs a decision rather than more prose:
+
+| Part    | What is missing                                                                                                                                            |
+|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **M2**  | What `verify!` prints when it fails - one line per problem, or one raised error listing all of them.                                                       |
+| **M5**  | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                                                         |
+| **M6b** | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.               |
+| **M7**  | `scaffold_ui` output is one line. Which files, in which namespace, with which route helpers and layout assumptions.                                        |
+| **M10** | The object handed to `config.on_event` is unspecified - the `Event` record, a value object, or a payload hash, and which associations are preloaded on it. |
+| **M4**  | `key_type` casting rules: what `:string` means for a non-integer, non-uuid PK, and what `finder` is expected to return for ids that no longer resolve.     |
 
 ## 18. Cut line for 1.0
 
@@ -2132,13 +2170,14 @@ override story, generators, host test kit, PostgreSQL-only, Rails 7.1–8.1.
 layer, no second CI target. The only concession is the schema posture in §5.7, which costs nothing today and
 keeps a future port from being a data migration.
 
-**Out, and say so plainly in the README:** delegation, escalation/reminders, a conditional-routing rules
+**Out, and say so plainly in the README:** typed payload validation, delegation, escalation/reminders, a
+conditional-routing rules
 engine, weighted quorum, bulk approval, non-PostgreSQL adapters, Phlex/ViewComponent satellites, an admin
 dashboard, a full transactional outbox.
 
 The non-goals list ships in the README: it tells an evaluator in ninety seconds whether the gem fits.
 
-## 19. Open decisions
+## 19. 0.x Decisions
 
 1. **Minimum Ruby:** The skeleton declares `required_ruby_version >= 4.0.0` and pins `.ruby-version` to
    4.0.6. _(older versions might be supported when requested)_
@@ -2148,7 +2187,6 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
 4. any actor is allowed to *request* anything registered? the approval gate is the control, and over-restricting creation makes the feature unusable. The hosting app shoudl prevent by its own auth logic, which actions can be triggered by whom.
 5. **Label freshness:** `:live` as default, with `:snapshot`as fall back.
 6. **No memoizing and not state for `ActorRef#record`**
-
 7. **The override requires only one person.**
 8. **Gem name availability** `change_requests` - has been reserved on RubyGems by releasing a first version without implementation.
 
