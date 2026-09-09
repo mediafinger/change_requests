@@ -9,7 +9,7 @@
 3. [Layering and repository layout](#3-layering-and-repository-layout)
 4. [Naming: resolving the CC/ZZ collision](#4-naming-resolving-the-cockpitzazu-collision)
 5. [Data model](#5-data-model)
-6. [The action registry](#6-the-action-registry)
+6. [Using the gem - a host's walkthrough](#6-using-the-gem---a-hosts-walkthrough)
 7. [Guards, commands, and the single source of truth](#7-guards-commands-and-the-single-source-of-truth)
 8. [Execution safety](#8-execution-safety)
 9. [Authorization and identity](#9-authorization-and-identity)
@@ -56,11 +56,11 @@ Neither source implementation is the right starting shape on its own:
 | Concurrency     | ❌ no locking                       | ✅ `with_lock` everywhere       | ZZ's locking, plus execution outside the lock   |
 | Approvals       | ❌ single `approver_id` column      | ✅ approvals table, flat quorum | ZZ's table, extended to stages                  |
 | Audit trail     | ❌ mutable `varchar`                | ⚠️ jsonb array                 | New: `change_request_events` table              |
-| Dispatch safety | ❌ unrestricted `constantize`       | ❌ unrestricted `constantize`   | New: action registry / allowlist                |
+| Dispatch safety | ❌ unrestricted `constantize`       | ❌ unrestricted `constantize`   | New: operation catalogue / allowlist            |
 | Authorization   | ⚠️ caller-supplied permissions     | ❌ tautological                 | New: gem resolves permissions; pluggable policy |
 | Views           | ❌ Haml, host partials, fork-to-use | ❌ Phlex, DaisyUI classes       | New: ERB + presenters + 6-tier override story   |
 
-The plan is: **CC's packaging + ZZ's domain + four things neither has** (registry, events table,
+The plan is: **CC's packaging + ZZ's domain + four things neither has** (the operation catalogue, events table,
 staged approvals, execution outside the row lock).
 
 **On views specifically:** ship ERB partials that each render a single presenter object, with a documented
@@ -135,7 +135,7 @@ change_requests/
 ├── README.md  CHANGELOG.md  LICENSE.txt  CODE_OF_CONDUCT.md
 ├── docs/
 │   ├── 01_getting_started.md
-│   ├── 02_registry.md
+│   ├── 02_operations.md
 │   ├── 03_approval_workflows.md               # flat N-of-M and staged M-to-N
 │   ├── 04_authorization.md
 │   ├── 05_execution_and_idempotency.md
@@ -146,7 +146,7 @@ change_requests/
 │   └── porting/{from_cockpit_engine.md,from_zazu_service.md}
 │
 ├── lib/
-│   ├── change_requests.rb                     # entrypoint: Zeitwerk loader, .configure, .registry, .request!
+│   ├── change_requests.rb                     # entrypoint: Zeitwerk loader, .configure, .operations, .request!
 │   └── change_requests/
 │       ├── version.rb
 │       ├── configuration.rb
@@ -160,7 +160,7 @@ change_requests/
 │       │   ├── event.rb
 │       │   └── attempt.rb
 │       ├── registry.rb
-│       ├── registry/action.rb
+│       ├── registry/operation.rb
 │       ├── registry/workflow.rb               # stage definitions
 │       ├── registry/payload_schema.rb
 │       ├── guards/                            # allowed? + reason, shared by commands AND presenters
@@ -198,7 +198,7 @@ change_requests/
 │   └── locales/en.yml
 │
 ├── lib/generators/change_requests/
-│   ├── install/         install_generator.rb + templates/{initializer.rb.tt,registry.rb.tt,migration.rb.tt,spec_support.rb.tt}
+│   ├── install/         install_generator.rb + templates/{initializer.rb.tt,operations.rb.tt,migration.rb.tt,spec_support.rb.tt}
 │   ├── action/          action_generator.rb  + templates/{action.rb.tt,action_spec.rb.tt}
 │   ├── controller/      controller_generator.rb + templates/controller.rb.tt
 │   ├── views/           views_generator.rb   # eject engine ERB, --only supported
@@ -246,8 +246,32 @@ Rule: **nouns are records, verbs are commands.** `Approval` is a row; `Approve` 
 codebases used `Approval` for the verb, which is exactly why ZZ ended up with a `ChangeRequestApproval`
 model that could not be namespaced.
 
+### 4.1 Operations, not "actions"
+
+The catalogue of gateable things is called **operations**, and the host-facing surface is
+`ChangeRequests.operations.define`:
+
+|                   | Earlier draft                  | Now                                | Why                                                                                                                         |
+|-------------------|--------------------------------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| The catalogue     | `ChangeRequests.registry.draw` | `ChangeRequests.operations.define` | `registry` names the mechanism; `operations` names the domain. `draw` is borrowed from `routes.draw` and means nothing here |
+| One entry         | `action "…" do \|a\|`          | `define "…" do \|op\|`             | flat, no wrapper block - splits across `config/change_requests/*.rb` naturally                                              |
+| Its key           | `action_key`                   | `operation_key`                    | `action` meant three things at once                                                                                         |
+| The target method | `op.action = :call`            | `op.methodname = :call`            | explicit, and no longer collides with Rails controller actions or with the entry itself                                     |
+| Not found         | `UnknownAction`                | `UnknownOperation`                 |                                                                                                                             |
+
+Two names were rejected for concrete collisions, not taste: `workflow` / `approval_flow` /
+`sign_off_chain` name the container after **one of eight facets** an entry declares (target, payload schema,
+payload labels, approvals, idempotency, retries, expiry, override) - and `workflow` is already both
+`op.workflow` and a column. `policies` collides with Pundit and ActionPolicy. `actions` collides with Rails.
+
+**The class keeps the accurate name.** `ChangeRequests::Registry` remains the internal constant and
+`lib/change_requests/registry/` the directory - a registry is precisely what the object is. The public DSL
+and the internal class need not match, and "operations" is the better word on the front door.
+
 Table names, fixed, no configurable prefix (a prefix option is pure maintenance tax):
-`change_requests`, `change_request_stages`, `change_request_approvals`, `change_request_events`,
+`change_requests`, `change_request_stages`, `change_request_stage_quorums`,
+`change_request_quorum_permissions`, `change_request_quorum_eligible_actors`,
+`change_request_approvals`, `change_request_approval_quorums`, `change_request_events`,
 `change_request_attempts`.
 
 ## 5. Data model
@@ -257,180 +281,239 @@ stage. This avoids a painful schema migration later, and costs one extra table n
 
 ### 5.1 `change_requests`
 
-| Column                      | Type                                     | Notes                                                          |
-|-----------------------------|------------------------------------------|----------------------------------------------------------------|
-| `id`                        | uuid (or bigint)                         | PK type chosen at install time                                 |
-| `action_key`                | string, not null                         | registry key, e.g. `"members.update_roles"`                    |
-| `service`                   | string, not null                         | resolved from the registry **at creation**, stored for audit   |
-| `action`                    | string, not null                         | ditto                                                          |
-| `payload`                   | jsonb, not null, default `{}`            | `attr_readonly` after create                                   |
-| `title`                     | string                                   | denormalised human label, computed from the registry at create |
-| `status`                    | string, not null, default `"pending"`    | **not** a PG enum - see §5.6                                   |
-| `requester_type`            | string, not null                         | `"User"`, `"Admin"`, … - allowlisted, see §5.6                 |
-| `requester_id`              | **string**, not null                     | string so heterogeneous PK types can share the column          |
-| `requester_label`           | string, not null                         | snapshot at creation; outlives the actor record                |
-| `executer_type`             | string, null                             |                                                                |
-| `executer_id`               | string, null                             |                                                                |
-| `executer_label`            | string, null                             | snapshot at execution                                          |
-| `tenant_type`               | string, null                             | only if `config.tenant_types` is configured                    |
-| `tenant_id`                 | string, null                             |                                                                |
-| `tenant_label`              | string, null                             | snapshot at creation                                           |
-| `payload_labels`            | jsonb, not null, default `{}`            | snapshot of human labels for the records the payload refers to |
-| `workflow`                  | jsonb, not null                          | frozen snapshot of the registry's approval policy              |
-| `stage_mode`                | string, not null, default `"sequential"` | `sequential` \| `parallel`                                     |
-| `current_stage_position`    | integer, not null, default 1             |                                                                |
-| `idempotency_key`           | string, null, **unique**                 | supplied or derived; dedupes creation                          |
-| `execution_token`           | uuid, null                               | regenerated per attempt; passed to idempotent targets          |
-| `attempts_count`            | integer, not null, default 0             |                                                                |
-| `max_attempts`              | integer, not null, default 1             | snapshot from registry                                         |
-| `expires_at`                | datetime, null                           |                                                                |
-| `executed_at`               | datetime, null                           | **written** (ZZ never wrote it)                                |
-| `failure_reason`            | text, null                               | plain column; the *structured* history lives in events         |
-| `lock_version`              | integer, not null, default 0             | optimistic lock, belt to `with_lock`'s braces                  |
-| `created_at` / `updated_at` | datetime, not null                       |                                                                |
+| Column                      | Type                                  | Notes                                                           |
+|-----------------------------|---------------------------------------|-----------------------------------------------------------------|
+| `id`                        | uuid (or bigint)                      | PK type chosen at install time                                  |
+| `operation_key`             | string, not null                      | catalogue key, e.g. `"members.update_roles"`                    |
+| `service`                   | string, not null                      | resolved from the catalogue **at creation**, stored for audit   |
+| `methodname`                | string, not null                      | ditto                                                           |
+| `payload`                   | jsonb, not null, default `{}`         | `attr_readonly` after create                                    |
+| `title`                     | string                                | denormalised human label, computed from the operation at create |
+| `status`                    | string, not null, default `"pending"` | **not** a PG enum - see §5.6                                    |
+| `requester_type`            | string, not null                      | `"User"`, `"Admin"`, … - allowlisted, see §5.6                  |
+| `requester_id`              | **string**, not null                  | string so heterogeneous PK types can share the column           |
+| `requester_label`           | string, not null                      | snapshot at creation; outlives the actor record                 |
+| `executer_type`             | string, null                          |                                                                 |
+| `executer_id`               | string, null                          |                                                                 |
+| `executer_label`            | string, null                          | snapshot at execution                                           |
+| `tenant_type`               | string, null                          | only if `config.tenant_types` is configured                     |
+| `tenant_id`                 | string, null                          |                                                                 |
+| `tenant_label`              | string, null                          | snapshot at creation                                            |
+| `payload_labels`            | jsonb, not null, default `{}`         | snapshot of human labels for the records the payload refers to  |
+| `workflow`                  | jsonb, not null                       | frozen snapshot of the operation's approval policy              |
+| `current_stage_position`    | integer, not null, default 1          | stages are always sequential - see §5.2                         |
+| `idempotency_key`           | string, null, **unique**              | supplied or derived; dedupes creation                           |
+| `execution_token`           | uuid, null                            | regenerated per attempt; passed to idempotent targets           |
+| `attempts_count`            | integer, not null, default 0          |                                                                 |
+| `max_attempts`              | integer, not null, default 1          | snapshot from the operation                                     |
+| `expires_at`                | datetime, null                        |                                                                 |
+| `executed_at`               | datetime, null                        | **written** (ZZ never wrote it)                                 |
+| `overridden_at`             | datetime, null                        | set when executed without the required approvals - see §8.1     |
+| `failure_reason`            | text, null                            | plain column; the *structured* history lives in events          |
+| `lock_version`              | integer, not null, default 0          | optimistic lock, belt to `with_lock`'s braces                   |
+| `created_at` / `updated_at` | datetime, not null                    |                                                                 |
 
 Indexes: `(status)`, `(tenant_type, tenant_id, status, created_at DESC)`, `(requester_type, requester_id)`,
-`(executer_type, executer_id)`, `(action_key)`, unique `(idempotency_key)` where not null, `(expires_at)`
-where `status IN ('pending','approved')` (partial index for the expiry sweeper).
+`(executer_type, executer_id)`, `(operation_key)`, unique `(idempotency_key)` where not null, `(expires_at)`
+where `status IN ('pending','approved')` (partial index for the expiry sweeper), and `(overridden_at)`
+where not null - overrides are the rows a compliance review asks for first.
 
-`attr_readonly :action_key, :service, :action, :payload, :payload_labels, :workflow, :requester_type,
+`attr_readonly :operation_key, :service, :methodname, :payload, :payload_labels, :workflow, :requester_type,
 :requester_id, :requester_label, :tenant_type, :tenant_id` - closes the "raise the quorum after approvals
 exist" hole, and makes the actor snapshot genuinely immutable rather than merely conventionally so.
 
 ### 5.2 `change_request_stages`
 
-| Column               | Type                                  | Notes                                      |
-|----------------------|---------------------------------------|--------------------------------------------|
-| `id`                 | uuid/bigint                           |                                            |
-| `change_request_id`  | FK, not null                          |                                            |
-| `position`           | integer, not null                     | unique with request_id                     |
-| `name`               | string, not null                      | `"peer"`, `"owner"`                        |
-| `rule`               | string, not null                      | `n_of` \| `all_of` \| `percent` \| `any`   |
-| `threshold`          | integer, null                         | count for `n_of`, percentage for `percent` |
-| `permission_match`   | string, not null, default `"any"`     | `any` \| `all` - **per stage**, see §5.2a  |
-| `status`             | string, not null, default `"pending"` | `pending` \| `satisfied` \| `rejected`     |
-| `satisfied_at`       | datetime, null                        |                                            |
+**Stages are always sequential.** An earlier draft carried a request-level `stage_mode`
+(`sequential | parallel`); quorums (§5.2a) make it redundant *and* strictly less expressive - a single flag
+cannot say "A and B together, then C, then D and E together", whereas three sequential stages of quorums
+can. The column is gone.
+
+| Column               | Type                                     | Notes                                           |
+|----------------------|------------------------------------------|-------------------------------------------------|
+| `id`                 | uuid/bigint                              |                                                 |
+| `change_request_id`  | FK, not null                             |                                                 |
+| `position`           | integer, not null                        | unique with request_id; stages advance in order |
+| `name`               | string, not null                         | `"operational"`, `"director"`                   |
+| `satisfied_by`       | string, not null, default `"any_quorum"` | `any_quorum` \| `all_quorums`                   |
+| `distinct_approvers` | boolean, not null, default `true`        | only meaningful for `all_quorums` - see §5.2a   |
+| `status`             | string, not null, default `"pending"`    | `pending` \| `satisfied` \| `rejected`          |
+| `satisfied_at`       | datetime, null                           |                                                 |
 
 Unique index `(change_request_id, position)`.
 
 Stages are created from the frozen `workflow` snapshot when the request is created. A stage is never edited.
 
-### 5.2a `change_request_stage_permissions` and `change_request_stage_eligible_actors`
+### 5.2a `change_request_stage_quorums` - the level that makes M-to-N work
 
-Who may approve a stage is expressed as **rows, not as array or JSON columns**.
+A stage holds one or more **quorums**. Each quorum is an independent counting rule with its own threshold
+and its own eligibility; the stage is satisfied when **any** of them is met, or **all**, per
+`satisfied_by`.
 
-| `change_request_stage_permissions` | Type         | Notes                                             |
-|------------------------------------|--------------|---------------------------------------------------|
-| `change_request_stage_id`          | FK, not null |                                                   |
-| `permission`                       | string, null | `NULL` = any permission (i.e. gate on type alone)  |
-| `actor_type`                       | string, null | `NULL` = any registered actor type                 |
+| Column                    | Type                                  | Notes                                      |
+|---------------------------|---------------------------------------|--------------------------------------------|
+| `id`                      | uuid/bigint                           |                                            |
+| `change_request_stage_id` | FK, not null                          |                                            |
+| `position`                | integer, not null                     | unique with stage_id; display order only   |
+| `name`                    | string, not null                      | `"admin"`, `"owners"`, `"peers"`           |
+| `rule`                    | string, not null                      | `n_of` \| `all_of` \| `percent` \| `any`   |
+| `threshold`               | integer, null                         | count for `n_of`, percentage for `percent` |
+| `permission_match`        | string, not null, default `"any"`     | `any` \| `all` - per quorum                |
+| `status`                  | string, not null, default `"pending"` | `pending` \| `satisfied`                   |
+| `satisfied_at`            | datetime, null                        |                                            |
+
+This is the level that carries a threshold, which is the whole point: **one integer per stage cannot express
+"one Admin *or* two Owners"** - two quorums with different thresholds can.
+
+```
+request
+  └─ stages            ordered, sequential, advance one at a time
+       └─ quorums      OR-ed or AND-ed within the stage (satisfied_by)
+            ├─ permission rows       who qualifies, by permission x actor type
+            └─ eligible actor rows   who qualifies, by name
+```
+
+Keep the axes distinct: permission and eligible-actor rows decide **who may** approve; `rule` and
+`threshold` decide **how many** must; `satisfied_by` decides **which quorums** have to be met.
+
+#### Eligibility rows
+
+| `change_request_quorum_permissions` | Type         | Notes                                        |
+|-------------------------------------|--------------|----------------------------------------------|
+| `change_request_stage_quorum_id`    | FK, not null |                                              |
+| `permission`                        | string, null | `NULL` = any permission (gate on type alone) |
+| `actor_type`                        | string, null | `NULL` = any registered actor type           |
 
 CHECK: `permission IS NOT NULL OR actor_type IS NOT NULL` - a row that constrains nothing is a bug, not a
 wildcard.
 
-| `change_request_stage_eligible_actors` | Type             |
-|----------------------------------------|------------------|
-| `change_request_stage_id`              | FK, not null     |
-| `actor_type`                           | string, not null |
-| `actor_id`                             | string, not null |
+| `change_request_quorum_eligible_actors` | Type             |
+|-----------------------------------------|------------------|
+| `change_request_stage_quorum_id`        | FK, not null     |
+| `actor_type`                            | string, not null |
+| `actor_id`                              | string, not null |
 
-Unique indexes `(change_request_stage_id, permission, actor_type)` and
-`(change_request_stage_id, actor_type, actor_id)`; plus reverse indexes `(permission)` and
-`(actor_type, actor_id)` for the query below.
+Unique indexes `(quorum_id, permission, actor_type)` and `(quorum_id, actor_type, actor_id)`; reverse
+indexes `(permission)` and `(actor_type, actor_id)` for the inbox query.
 
-**Two nullable columns give a complete 2×2 of eligibility**, which is what lets one gem serve both an app
+**Two nullable columns give a complete 2x2 of eligibility**, which is what lets one gem serve both an app
 with several actor classes and an app with one actor class and a role list:
 
-| `permission` | `actor_type` | Means                                       | Typical app                |
-|--------------|--------------|---------------------------------------------|----------------------------|
-| `"owner"`    | `NULL`       | anyone holding `owner`                      | single class + roles       |
-| `"owner"`    | `"Admin"`    | Admins holding `owner`                      | several classes            |
-| `NULL`       | `"Admin"`    | any Admin, whatever they hold               | several classes            |
-| `NULL`       | `NULL`       | *rejected by the CHECK*                     | -                          |
+| `permission` | `actor_type` | Means                         | Typical app          |
+|--------------|--------------|-------------------------------|----------------------|
+| `"owner"`    | `NULL`       | anyone holding `owner`        | single class + roles |
+| `"owner"`    | `"Admin"`    | Admins holding `owner`        | several classes      |
+| `NULL`       | `"Admin"`    | any Admin, whatever they hold | several classes      |
+| `NULL`       | `NULL`       | *rejected by the CHECK*       | -                    |
 
-So "an Admin **or** an Editor must approve, but never a User or a Creator" is two rows either way. As roles
+So "an Admin **or** an Editor may approve, but never a User or a Creator" is two rows either way. As roles
 on one class: `("admin", NULL)` and `("editor", NULL)`. As separate classes: `(NULL, "Admin")` and
-`(NULL, "Editor")`, or with a permission gate as well if the class alone is too coarse.
+`(NULL, "Editor")`.
 
-**`permission_match` lives on the stage, not in global config.** Multiple rows on one stage mean
-"any of these" under `match: :any` and "all of these" under `match: :all` - opposite meanings for identical
-data, so the mode belongs next to the rows it governs rather than in an app-wide flag. `config` supplies
-only the default. This lets one app hold both:
+`permission_match` sits on the **quorum**, not in global config: multiple rows mean "any of these" under
+`:any` and "all of these" (a per-actor AND - *this* actor holds every listed permission) under `:all`.
+Identical rows, opposite meanings, so the mode belongs beside the rows it governs. `config` supplies only
+the default.
 
-```ruby
-w.stage :review, permissions: %w(admin editor),      match: :any, rule: :n_of, threshold: 1
-w.stage :sign,   permissions: %w(finance compliance), match: :all, rule: :n_of, threshold: 2
+#### `change_request_approval_quorums` - which quorums an approval counted toward
+
+| Column                           | Type         |
+|----------------------------------|--------------|
+| `change_request_approval_id`     | FK, not null |
+| `change_request_stage_quorum_id` | FK, not null |
+
+Write-once, evaluated **at decision time**, unique on the pair. Two reasons it exists rather than
+re-deriving eligibility when counting:
+
+1. **Counting becomes a `GROUP BY`** instead of re-evaluating every approver against every quorum.
+2. **An approval stays counted when the approver's permissions later change.** Re-derivation would let a
+   role change silently un-approve a request - the same class of bug as recomputing labels instead of
+   snapshotting them (§5.6).
+
+**`distinct_approvers`** (stage level, default `true`) governs the ambiguity this creates under
+`all_quorums`: if Edith holds both `admin` and `owner`, may her single approval satisfy the admin quorum
+*and* count toward the owners quorum? For an AND-ed stage, almost certainly not - "1 Admin and 2 Owners"
+means three people - so her approval links to exactly one quorum, the first she qualifies for. Under
+`any_quorum` the flag is inert: an approval links to every quorum it matches, since satisfying either ends
+the stage anyway.
+
+The enforcement key is `(approver_type, approver_id)`, so this is airtight **within** an actor class. Across
+classes the gem cannot know that `Admin#7` and `User#99` are the same human - two records, two deliberate
+operations, two attributed rows. That is a human problem, and the events table is the mitigation.
+`config.actor_identity` (§10) is the opt-in lever for hosts that *do* have a shared identity.
+
+#### The approver inbox
+
+> **Gem internals.** Hosts call `Request.awaiting_approval_from(actor)` (§6.7); this is what it compiles to.
+
+"Every request awaiting *my* approval" is the badge in the navigation, the target list for notifications,
+and the first thing anyone asks a change-request system for. Because eligibility is rows, it is one
+indexed, paginated query rather than a scan:
+
+```sql
+-- "does this actor satisfy this permission row" - shared by both match modes
+WITH matched AS (
+  SELECT p.change_request_stage_quorum_id AS quorum_id, p.id AS row_id
+    FROM change_request_quorum_permissions p
+   WHERE (p.permission IS NULL OR p.permission IN (:actor_permissions))
+     AND (p.actor_type  IS NULL OR p.actor_type  =  :actor_type)
+),
+eligible_quorums AS (
+  SELECT q.id, q.change_request_stage_id
+    FROM change_request_stage_quorums q
+   WHERE q.status = 'pending'
+     AND ( CASE q.permission_match
+             WHEN 'any' THEN EXISTS (SELECT 1 FROM matched m WHERE m.quorum_id = q.id)
+             WHEN 'all' THEN (SELECT COUNT(*) FROM matched m WHERE m.quorum_id = q.id)
+                           = (SELECT COUNT(*) FROM change_request_quorum_permissions p
+                               WHERE p.change_request_stage_quorum_id = q.id)
+           END
+           OR EXISTS (SELECT 1 FROM change_request_quorum_eligible_actors e
+                       WHERE e.change_request_stage_quorum_id = q.id
+                         AND e.actor_type = :actor_type AND e.actor_id = :actor_id) )
+)
+SELECT r.* FROM change_requests r
+  JOIN change_request_stages s ON s.change_request_id = r.id
+                              AND s.position = r.current_stage_position
+                              AND s.status   = 'pending'
+  JOIN eligible_quorums eq ON eq.change_request_stage_id = s.id
+ WHERE r.status = 'pending'
+   AND NOT EXISTS (SELECT 1 FROM change_request_approvals a
+                    WHERE a.change_request_stage_id = s.id
+                      AND a.approver_type = :actor_type AND a.approver_id = :actor_id)
+   AND (r.requester_type, r.requester_id) IS DISTINCT FROM (:actor_type, :actor_id)
+ GROUP BY r.id
 ```
 
-Keep the two axes distinct: these rows decide **who may** approve; `rule` and `threshold` decide **how
-many** must. "Any two of {Admin, Editor}" is one stage (`match: :any`, `threshold: 2`); "one Admin **and**
-two Owners" is two stages.
+The `all` branch is a count-match rather than a plain `IN`, which is precisely why the mode has to be a
+column - the query shape differs per quorum. As a `text[]` this needs `&&` and a GIN index; as `jsonb` it
+needs containment operators; in Ruby it cannot be paginated at all. Ships as
+`ChangeRequests::Request.awaiting_approval_from(actor)`, and `Guards::Approve` evaluates the identical
+predicate against a single loaded quorum - one definition of eligibility, two call sites, asserted equal by
+a spec over every cell of the 2x2 (§15.2).
 
-Both were `text[]` / `jsonb` in an earlier draft. Rows are better on two independent grounds:
-
-1. **The approver inbox is a real query.** "Every request awaiting *my* approval" is the badge in the
-   navigation, the target list for notifications, and the first thing anyone asks a change-request system
-   for. As rows it is one indexed, paginated query:
-
-   ```sql
-   -- one CTE defines "this actor satisfies this permission row", used by both match modes
-   WITH matched AS (
-     SELECT p.change_request_stage_id AS stage_id, p.id AS row_id
-       FROM change_request_stage_permissions p
-      WHERE (p.permission IS NULL OR p.permission IN (:actor_permissions))
-        AND (p.actor_type  IS NULL OR p.actor_type  =  :actor_type)
-   )
-   SELECT r.* FROM change_requests r
-     JOIN change_request_stages s
-       ON s.change_request_id = r.id AND s.position = r.current_stage_position
-                                     AND s.status = 'pending'
-   WHERE r.status = 'pending'
-     AND (
-       -- eligible by permission …
-       CASE s.permission_match
-         WHEN 'any' THEN EXISTS (SELECT 1 FROM matched m WHERE m.stage_id = s.id)
-         WHEN 'all' THEN (SELECT COUNT(*) FROM matched m WHERE m.stage_id = s.id)
-                       = (SELECT COUNT(*) FROM change_request_stage_permissions p
-                           WHERE p.change_request_stage_id = s.id)
-       END
-       -- … or by name
-       OR EXISTS (SELECT 1 FROM change_request_stage_eligible_actors e
-                   WHERE e.change_request_stage_id = s.id
-                     AND e.actor_type = :actor_type AND e.actor_id = :actor_id)
-     )
-     AND NOT EXISTS (SELECT 1 FROM change_request_approvals a
-                     WHERE a.change_request_stage_id = s.id
-                       AND a.approver_type = :actor_type AND a.approver_id = :actor_id)
-     AND (r.requester_type, r.requester_id) IS DISTINCT FROM (:actor_type, :actor_id)
-   ```
-
-   The `all` branch is a count-match rather than a plain `IN`, which is precisely why the mode has to be a
-   column: the query shape differs per stage. As a `text[]` this needs `&&` and a GIN index; as `jsonb` it
-   needs containment operators; in Ruby it cannot be paginated at all. Ships as
-   `ChangeRequests::Request.awaiting_approval_from(actor)`, and `Guards::Approve` evaluates the identical
-   predicate against a single loaded stage - one definition of eligibility, two call sites.
-
-2. **It is the one place the schema would otherwise be PostgreSQL-shaped for no gain** - see §5.6.
-
-Both tables are write-once, populated when the stage is materialised from the frozen workflow, and never
-Both tables are write-once, populated when the stage is materialised from the frozen workflow, and never
-updated - so a `permissions` list edited in the registry never changes who may approve an in-flight
+Every table in §5.2a is write-once, materialised when the stage is created from the frozen workflow, and
+never updated - so a `permissions` list edited in an operation never changes who may approve an in-flight
 request.
 
 ### 5.3 `change_request_approvals`
 
-| Column                    | Type               | Notes                                   |
-|---------------------------|--------------------|-----------------------------------------|
-| `id`                      | uuid/bigint        |                                         |
-| `change_request_id`       | FK, not null       | denormalised for cheap counting/scoping |
-| `change_request_stage_id` | FK, not null       |                                         |
-| `approver_type`           | string, not null   | allowlisted, see §5.6                   |
-| `approver_id`             | string, not null   |                                         |
-| `approver_label`          | string, not null   | snapshot at decision time               |
-| `decision`                | string, not null   | `approved` \| `rejected`                |
-| `comment`                 | text, null         |                                         |
-| `decided_at`              | datetime, not null |                                         |
-| `created_at`/`updated_at` | datetime, not null | ZZ omitted these; keep them             |
+| Column                    | Type               | Notes                                    |
+|---------------------------|--------------------|------------------------------------------|
+| `id`                      | uuid/bigint        |                                          |
+| `change_request_id`       | FK, not null       | denormalised for cheap counting/scoping  |
+| `change_request_stage_id` | FK, not null       |                                          |
+| `approver_type`           | string, not null   | allowlisted, see §5.6                    |
+| `approver_id`             | string, not null   |                                          |
+| `approver_label`          | string, not null   | snapshot at decision time                |
+| `approver_identity`       | string, null       | `config.actor_identity` snapshot, if set |
+| `decision`                | string, not null   | `approved` \| `rejected`                 |
+| `comment`                 | text, null         |                                          |
+| `decided_at`              | datetime, not null |                                          |
+| `created_at`/`updated_at` | datetime, not null | ZZ omitted these; keep them              |
+
+Which quorums the approval counted toward is recorded in `change_request_approval_quorums` (§5.2a), never
+re-derived.
 
 **Unique index `(change_request_stage_id, approver_type, approver_id)`** - the DB, not application code,
 enforces one-decision-per-approver-per-stage. (ZZ's index was per request; per stage is correct once stages
@@ -453,8 +536,12 @@ symbol/string-key class of bug outright.
 | `metadata`          | jsonb, not null, default `{}` | stage name, attempt number, previous status, …             |
 | `occurred_at`       | datetime, not null            |                                                            |
 
-Kinds: `requested`, `approved`, `unapproved`, `rejected`, `commented`, `canceled`, `stage_satisfied`,
-`execution_started`, `executed`, `execution_failed`, `expired`, `reaped`.
+Kinds: `requested`, `approved`, `unapproved`, `rejected`, `commented`, `canceled`, `quorum_satisfied`,
+`stage_satisfied`, `overridden`, `execution_started`, `executed`, `execution_failed`, `expired`, `reaped`.
+
+`stage_satisfied` carries `metadata: { quorum: "admin" }` - so a stage met through a one-admin shortcut is
+distinguishable in the timeline from one met the long way, rather than looking identical. `overridden` is
+§8.1.
 
 Index `(change_request_id, occurred_at)`. No `updated_at` - rows are immutable; enforce with
 `before_update { raise ActiveRecord::ReadOnlyRecord }` and, optionally, a documented PG rule/trigger snippet
@@ -466,9 +553,9 @@ row's lifecycle columns, not to appending events.
 
 ### 5.5 `change_request_attempts`
 
-| Column                                                                                                                                          | Type | Notes                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------|------|--------------------------------------|
-| `id`, `change_request_id` FK, `number` int, `execution_token` uuid                                                                              |      | unique `(change_request_id, number)` |
+| Column                                                                                                                                                                        | Type | Notes                                |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------|--------------------------------------|
+| `id`, `change_request_id` FK, `number` int, `execution_token` uuid                                                                                                            |      | unique `(change_request_id, number)` |
 | `executer_type`/`executer_id`/`executer_label`, `started_at`, `finished_at`, `outcome` (`succeeded`\|`failed`\|`abandoned`), `error_class`, `error_message`, `backtrace` text |      |                                      |
 
 This is what makes "did the outbound call happen before it blew up?" answerable, and what makes a retry
@@ -499,11 +586,11 @@ Two requirements rule both out:
 
 So every reference to a host record is a **triple**:
 
-| Concern           | Column     | Notes                                                     |
-|-------------------|------------|-----------------------------------------------------------|
-| Which class       | `*_type`   | string, validated against the configured allowlist (§9)   |
-| Which record      | `*_id`     | **string**                                                |
-| What to display   | `*_label`  | captured at write time, `attr_readonly`, never recomputed |
+| Concern         | Column    | Notes                                                     |
+|-----------------|-----------|-----------------------------------------------------------|
+| Which class     | `*_type`  | string, validated against the configured allowlist (§9)   |
+| Which record    | `*_id`    | **string**                                                |
+| What to display | `*_label` | captured at write time, `attr_readonly`, never recomputed |
 
 Applied to `requester`, `executer`, `approver`, event `actor`, attempt `executer` and `tenant`.
 
@@ -551,7 +638,7 @@ those may never be wanted, and speculative portability shims are pure cost.
 What *is* deliberate is not painting into a corner, because these three choices are free now and expensive
 to unwind after data exists:
 
-- **No array columns.** `stage.permissions` and named approvers are join tables (§5.2a) - which is the
+- **No array columns.** Quorum permissions and named approvers are join tables (§5.2a) - which is the
   better design anyway, since it is what makes the approver inbox a paginatable query.
 - **`jsonb` for storage, never for correctness.** `payload`, `payload_labels`, `workflow` and event
   `metadata` are written and read whole, in Ruby. No `@>`, no `->>`, no GIN index is load-bearing. A jsonb
@@ -564,11 +651,11 @@ Everything else stays unapologetically PostgreSQL: `jsonb` (not `json`), partial
 Note that §8's atomic claim is a conditional `UPDATE … WHERE status = …` with a zero-rows check rather than
 a `FOR UPDATE` read - chosen for correctness, portable as a side effect.
 
-**Payload records get the same treatment.** A registry action may declare how to label the records its
+**Payload records get the same treatment.** An operation may declare how to label the records its
 payload references, and the result is snapshotted at creation:
 
 ```ruby
-a.payload_labels = ->(payload) { { member_id: Member.find_by(id: payload[:member_id])&.name } }
+op.payload_labels = ->(payload) { { member_id: Member.find_by(id: payload[:member_id])&.name } }
 ```
 
 `title` and `payload_labels` together mean the show page for an old request stays fully readable after both
@@ -581,16 +668,17 @@ the field, all of which render nothing once the record is destroyed.
 ```
                     ┌───────────── unapprove (quorum lost) ─────────────┐
                     ▼                                                   │
-  (create) ──▶ pending ──── approve × N per stage ─────▶ approved ──────┘
-                 │ │                                        │
-                 │ │                                        ├── execute ──▶ executing ──▶ successful ▲ final
-                 │ │                                        │                    │
-                 │ │                                        │                    └──▶ failed ──┐
-                 │ │                                        │                          ▲       │ retry
-                 │ └──── reject ──▶ rejected ▲ final        │                          └───────┘
-                 │                                          │                          (max_attempts)
-                 ├──── cancel ──▶ canceled ▲ final ◀────────┤
-                 └──── expire ──▶ expired  ▲ final ◀────────┘
+  (create) ──▶ pending ── quorums ──▶ stage satisfied ──▶ approved ─────┘
+                 │ │        met         next stage,          │
+                 │ │                    or approved          ├── execute ──▶ executing ──▶ successful ▲ final
+                 │ │                                         │                    │
+                 │ │                                         │                    └──▶ failed ──┐
+                 │ └──── reject ──▶ rejected ▲ final         │                          ▲       │ retry
+                 │                                           │                          └───────┘
+                 ├──── cancel ──▶ canceled ▲ final ◀─────────┤                          (max_attempts)
+                 └──── expire ──▶ expired  ▲ final ◀─────────┘
+
+  pending ──── execute(override: true) ──▶ executing ──▶ successful   (§8.1; sets overridden_at)
 ```
 
 `STATUSES = %w(pending approved executing successful failed rejected canceled expired)`
@@ -602,86 +690,375 @@ distinct from "never mind" - non-negotiable for a public approval gem).
 Terminal-state protection stays at the model layer, as in both sources - `before_update` raising if
 `status_was` was final. It is the right defensive choice: it holds even when a caller bypasses the commands.
 
-## 6. The action registry
+## 6. Using the gem - a host's walkthrough
 
-The single highest-value new component. It is the allowlist that closes `constantize` + `public_send` on
-arbitrary stored strings, and it is simultaneously the payload schema, the approval policy, and the retry
-policy. One object solves five problems.
+> **Everything in this section is code you write or call in your own application.** No gem internals appear
+> here. For those, see §5.2a (schema and the inbox query), §7 (guards and commands), §8 (execution and
+> override) and §11 (presenters).
+
+The whole surface a host touches is five things: an initializer, a set of operation declarations, one
+method to create a request, one command per transition, and one scope to list what is waiting for you.
+
+### 6.1 Install
+
+```bash
+bin/rails generate change_requests:install --primary-key-type=uuid --with-specs
+bin/rails db:migrate
+```
 
 ```ruby
-# config/initializers/change_requests_registry.rb  (generated by the install generator)
+# config/routes.rb - only if you want the built-in UI
+mount ChangeRequests::Engine, at: "/change_requests"
+```
 
-ChangeRequests.registry.draw do
-  action "members.update_roles" do |a|
-    a.service = "Members::UpdateRoles"
-    a.action  = :call                             # must be a public singleton method
-    a.title   = ->(payload) { "Update roles for member #{payload[:member_id]}" }
+### 6.2 Tell it about your actors
 
-    a.payload_schema do |s|
-      s.uuid   :member_id, required: true
-      s.array  :roles, of: :string, required: true, in: %w(owner admin editor viewer)
-    end
+Actor *classes* are registered once; the actor *instance* is passed per request. One class with roles, or
+several classes, or a mix - see §9 for the full surface.
 
-    a.idempotent   = true                          # may be retried safely
-    a.max_attempts = 3
-    a.expires_in   = 7.days
+```ruby
+# config/initializers/change_requests.rb
+ChangeRequests.configure do |config|
+  config.actor_type "User" do |t|
+    t.key_type    = :uuid
+    t.label       = ->(user) { user.full_name.presence || user.email }
+    t.permissions = ->(user) { user.roles }              # => ["member", "owner", …]
+  end
 
-    # flat N-of-M shorthand:
-    a.approvals permissions: %w(member_admin), required: 2
+  config.actor_type "Admin" do |t|
+    t.key_type    = :integer
+    t.label       = ->(admin) { "#{admin.name} (admin)" }
+    t.permissions = ->(admin) { admin.roles + %w(admin) }
+  end
 
-    # …or a staged M-to-N workflow:
-    a.workflow mode: :sequential do |w|
-      # "an admin OR an editor" - roles on a single actor class
-      w.stage :review, permissions: %w(admin editor), match: :any, rule: :n_of, threshold: 1
+  config.current_actor = ->(controller) { controller.current_admin || controller.current_user }
+end
+```
 
-      # "any Admin, or a User holding :owner" - several actor classes, mixed gating
-      w.stage :owner,  permissions: [{ actor_type: "Admin" },
-                                     { permission: "owner", actor_type: "User" }],
-                       match: :any, rule: :n_of, threshold: 2
+### 6.3 Write the thing that will eventually run
 
-      # "must hold BOTH finance and compliance", plus two named approvers by hand
-      w.stage :sign,   permissions: %w(finance compliance), match: :all,
-                       eligible_actors: [cfo, general_counsel], rule: :all_of
+An ordinary service object of your own. The only contract: a **public singleton method taking keyword
+arguments**, whose effect is transactional or idempotent.
+
+```ruby
+# app/services/members/update_roles.rb
+module Members
+  class UpdateRoles
+    def self.call(member_id:, roles:)
+      Member.find(member_id).update!(roles: roles)
     end
   end
 end
 ```
 
-**Guarantees the registry provides**
-
-1. **Dispatch allowlist.** `Execution::Dispatcher` resolves `action_key → (service, action)` from the
-   registry, never from the stored strings. The stored `service`/`action` columns become audit data, not
-   dispatch input. A row whose `action_key` is no longer registered is unexecutable, by construction. This
-   is the RCE fix, and it survives careless `create` endpoints.
-2. **Payload validation at creation.** A typed schema validated when the request is made, not discovered as
-   an `ArgumentError` at execution time, weeks later, by the person clicking Execute.
-3. **Approval policy is policy, not caller input.** `required_approvals` / `permissions` come from the
-   registry; the caller cannot supply them.
-4. **Snapshot-on-create.** The resolved workflow is frozen into `change_requests.workflow` and materialised
-   into `change_request_stages`. Editing the registry never retroactively changes in-flight requests, and
-   never leaves a request wrongly `approved` or wrongly `pending`.
-5. **Explicit retryability.** `idempotent` and `max_attempts` are per-action declarations, not an implicit
-   global "failed requests can be retried forever".
-6. **Boot-time verification.** `ChangeRequests.registry.verify!` (called from `to_prepare` in dev/test, and
-   available as `rake change_requests:verify`) asserts every service constant resolves, every action exists
-   as a public singleton method, every declared permission is a String, and every schema key corresponds to a
-   keyword parameter of the target method. This is the fix for CC's validator/executor mismatch, where
-   validation checked `instance_methods` and execution called a class method - a first-five-minutes failure
-   for any adopter using the ordinary `def self.call` idiom.
-
-**Creation API:**
+### 6.4 Declare it as an operation
 
 ```ruby
-request = ChangeRequests.request!(
-  "members.update_roles",
-  payload:   { member_id: member.id, roles: %w(editor) },
-  requester: current_user,
-  tenant:    current_organization,     # optional
-  idempotency_key: "roles:#{member.id}:#{digest}"   # optional; dedupes
+# config/initializers/change_requests_operations.rb
+ChangeRequests.operations.define "members.update_roles" do |op|
+  op.service    = "Members::UpdateRoles"
+  op.methodname = :call
+  op.title      = ->(payload) { "Update roles for member #{payload[:member_id]}" }
+
+  op.payload_schema do |s|
+    s.uuid  :member_id, required: true
+    s.array :roles, of: :string, required: true, in: %w(owner admin editor viewer)
+  end
+  op.payload_labels = ->(p) { { member_id: Member.find_by(id: p[:member_id])&.name } }
+
+  op.idempotent   = true
+  op.max_attempts = 3
+  op.expires_in   = 7.days
+
+  op.approvals permissions: %w(member_admin), required: 2
+end
+```
+
+`op.approvals` is the shorthand for the common case - one rule, no ceremony:
+
+```ruby
+op.approvals permissions: %w(member_admin), required: 2         # two holders of :member_admin
+op.approvals actor_type: "Admin", required: 1                   # one Admin (a class, not a permission)
+op.approvals permissions: %w(finance compliance), match: :all, required: 1   # one person holding both
+op.approvals eligible_actors: [cfo, general_counsel], required: 2            # only these two people
+```
+
+### 6.5 Create a request
+
+Instead of calling `Members::UpdateRoles.call(...)` directly, record the intent:
+
+```ruby
+# app/controllers/members_controller.rb
+def update_roles
+  ChangeRequests.request!(
+    "members.update_roles",
+    payload:   { member_id: params[:id], roles: params[:roles] },
+    requester: current_user,
+    tenant:    current_organization,                       # optional
+    idempotency_key: "roles:#{params[:id]}:#{Digest::SHA256.hexdigest(params[:roles].to_s)}"
+  )
+
+  redirect_to change_requests_path, notice: "Submitted for approval"
+rescue ChangeRequests::InvalidPayload => e
+  redirect_back fallback_location: root_path, alert: e.message
+end
+```
+
+Nothing has run. The member's roles are unchanged.
+
+**The call is identical no matter how elaborate the workflow is** - you never pass thresholds, permissions
+or stages. Those live in the operation, are resolved at creation, and are frozen onto the request.
+
+### 6.6 Approve, and execute
+
+Five commands, one shape. Each takes the request and the acting actor, and raises a typed error the
+controller can rescue in one place.
+
+```ruby
+ChangeRequests::Commands::Approve.call(request:, actor: current_user, comment: "Checked with HR")
+ChangeRequests::Commands::Unapprove.call(request:, actor: current_user)
+ChangeRequests::Commands::Reject.call(request:, actor: current_user, reason: "Wrong member")
+ChangeRequests::Commands::Cancel.call(request:, actor: current_user, reason: "No longer needed")
+ChangeRequests::Commands::Comment.call(request:, actor: current_user, body: "Waiting on legal")
+ChangeRequests::Commands::Execute.call(request:, actor: current_user)
+```
+
+End to end, with the two approvals the operation demanded:
+
+```ruby
+request = ChangeRequests.request!("members.update_roles", payload:, requester: alice)
+request.status                    # => "pending"
+
+ChangeRequests::Commands::Approve.call(request:, actor: bob)
+request.reload.status             # => "pending"   (1 of 2)
+
+ChangeRequests::Commands::Approve.call(request:, actor: carol)
+request.reload.status             # => "approved"
+
+ChangeRequests::Commands::Execute.call(request:, actor: carol)
+request.reload.status             # => "successful"
+Member.find(member_id).roles      # => the new roles - now, and not before
+```
+
+Alice cannot approve her own request; that is the point:
+
+```ruby
+ChangeRequests::Commands::Approve.call(request:, actor: alice)
+# => ChangeRequests::NotApprovable (reason: :requester)
+```
+
+If you only need one controller, this is all of it:
+
+```ruby
+class ChangeRequestsController < ApplicationController
+  rescue_from ChangeRequests::Error, with: ->(e) { redirect_back fallback_location: root_path, alert: e.message }
+
+  def approve
+    ChangeRequests::Commands::Approve.call(request: find_request, actor: current_user)
+    redirect_to change_requests_path, notice: "Approved"
+  end
+
+  private
+
+  def find_request = ChangeRequests::Request.visible_to(current_user).find(params[:id])
+end
+```
+
+### 6.7 Find what is waiting for me
+
+```ruby
+ChangeRequests::Request.awaiting_approval_from(current_user)   # a real, paginatable scope
+ChangeRequests::Request.visible_to(current_user).pending
+ChangeRequests::Request.where.not(overridden_at: nil)          # the compliance report
+current_user.pending_change_request_approvals                  # with `include ChangeRequests::Actor`
+```
+
+```erb
+<%= link_to "Approvals", change_requests_path %>
+<span class="badge"><%= ChangeRequests::Request.awaiting_approval_from(current_user).count %></span>
+```
+
+### 6.8 Show it
+
+Either mount the engine and get a working screen, or build your own against the presenter (§11, §12):
+
+```erb
+<% presenter = ChangeRequests::RequestPresenter.new(@request, actor: current_user, routes: self) %>
+
+<h1><%= presenter.title %></h1>
+<p>Requested by <%= presenter.requester.label %></p>
+
+<% presenter.stages.each do |stage| %>
+  <li><%= stage.name %> - <%= stage.satisfied? ? "done" : stage.remaining_options.join(", or ") %></li>
+<% end %>
+
+<% presenter.actions.each do |action| %>
+  <%= button_to action.label, action.path, disabled: !action.enabled, title: action.reason %>
+<% end %>
+```
+
+### 6.9 Complex approval workflows
+
+Same declaration, `op.workflow` instead of `op.approvals`. Stages run in order; within a stage, quorums are
+independent counting rules that are OR-ed or AND-ed. Four shapes cover essentially every real policy.
+
+**(a) "One Admin OR two Owners"** - alternative routes to the same gate
+
+```ruby
+op.workflow do |w|
+  w.stage :operational, satisfied_by: :any_quorum do |q|
+    q.quorum :admin,  permissions: [{ actor_type: "Admin" }], rule: :n_of, threshold: 1
+    q.quorum :owners, permissions: %w(owner),                 rule: :n_of, threshold: 2
+  end
+end
+```
+
+**(b) "One Admin AND two Owners, then a Director"**
+
+```ruby
+op.workflow do |w|
+  w.stage :operational, satisfied_by: :all_quorums, distinct_approvers: true do |q|
+    q.quorum :admin,  permissions: [{ actor_type: "Admin" }], rule: :n_of, threshold: 1
+    q.quorum :owners, permissions: %w(owner),                 rule: :n_of, threshold: 2
+  end
+
+  w.stage :director, permissions: %w(director), rule: :n_of, threshold: 1
+end
+```
+
+One word - `:any_quorum` to `:all_quorums` - is the entire difference between (a) and (b).
+`distinct_approvers: true` (the default) means an Admin who also holds `owner` counts toward one quorum
+only, so this really is three people.
+
+**(c) The GitHub shortcut - "two peers, or one admin"**
+
+```ruby
+op.workflow do |w|
+  w.stage :review, satisfied_by: :any_quorum do |q|
+    q.quorum :peers, permissions: %w(member), rule: :n_of, threshold: 2
+    q.quorum :admin, permissions: %w(admin),  rule: :n_of, threshold: 1
+  end
+end
+```
+
+Reach for this when the shortcut genuinely *is* the policy. When it is an exception someone should be
+accountable for, use the override in §6.10 instead - it says so far more loudly.
+
+**(d) Everything at once**
+
+```ruby
+op.workflow do |w|
+  w.stage :triage, permissions: %w(support), rule: :n_of, threshold: 1
+
+  w.stage :approval, satisfied_by: :all_quorums do |q|
+    q.quorum :risk,  permissions: %w(risk compliance), match: :all, rule: :n_of, threshold: 1
+    q.quorum :money, permissions: %w(finance),         rule: :percent, threshold: 60
+    q.quorum :named, eligible_actors: [cfo],           rule: :all_of
+  end
+
+  w.stage :sign_off, permissions: [{ actor_type: "Director" }], rule: :n_of, threshold: 1
+end
+```
+
+Creating and approving is unchanged - only the sequence of people differs:
+
+```ruby
+request = ChangeRequests.request!("payouts.release", payload: { payout_id: }, requester: alice)
+
+Approve.call(request:, actor: director_alan)   # => NotApprovable (reason: :stage_not_current)
+
+Approve.call(request:, actor: support_sam)     # stage 1 satisfied
+Approve.call(request:, actor: risk_rita)       # risk  ✓
+Approve.call(request:, actor: finance_fay)     # money 60% ✓
+Approve.call(request:, actor: cfo)             # named ✓ → stage 2 satisfied
+Approve.call(request:, actor: director_alan)   # → "approved"
+
+Execute.call(request:, actor: ops_olive)
+```
+
+#### Terminology
+
+* **`stage`** = a step, they run sequentially in order
+* **`quorum`** = the counting rule inside a step
+* **`satisfied_by`** = whether `any_quorum` or `all_quorums` must be met
+* **`eligible_actors`** = decide who (actor class or role permissions) may approve
+* **`rule` / `threshold`** = decide how many actors have to approve to permit execution
+
+### 6.10 Break glass
+
+Opt in per action, then pass `override: true` explicitly. Off by default; §8.1 covers what the gem does
+with it.
+
+```ruby
+op.override permissions: %w(security_officer), require_reason: true
+```
+
+```ruby
+ChangeRequests::Commands::Execute.call(
+  request:, actor: current_admin,
+  override: true,
+  reason:   "Payment provider outage, CFO approved by phone"
 )
 ```
 
-Raises `ChangeRequests::UnknownAction`, `ChangeRequests::InvalidPayload`, or `ChangeRequests::NotAuthorized`.
+Audit all ChangeRequests that have been executed before sufficient approvals were given:
+
+```ruby
+ChangeRequests::Request.where.not(overridden_at: nil)   # every override, ever
+```
+
+### 6.11 Test your operations
+
+```ruby
+# spec/change_requests/operations_spec.rb
+require "change_requests/rspec"
+
+RSpec.describe ChangeRequests.operations do
+  ChangeRequests.operations.keys.each do |key|
+    it_behaves_like "a registered change request operation", key
+  end
+end
+
+RSpec.describe "roles workflow" do
+  include_context "with change requests"
+
+  it "needs two approvals" do
+    request = ChangeRequests::Testing.build_request(operation_key: "members.update_roles", requester: alice)
+
+    expect(request).to be_approvable_by(bob)
+    expect(request).not_to be_approvable_by(alice)
+
+    ChangeRequests::Testing.approve_fully!(request, approvers: [bob, carol])
+    expect(request).to have_change_request_status(:approved)
+  end
+end
+```
+
+### 6.12 Why declaring operations is required
+
+Declaring your operations up front is the one thing this gem asks of you that the alternatives do not, so
+it is worth saying what it buys:
+
+1. **Dispatch allowlist.** Execution resolves `operation_key → (service, methodname)` from the catalogue,
+   never from the strings stored on the row. Those columns become audit data, not dispatch input, and a request whose
+   `operation_key` is no longer registered simply cannot run. Both source implementations called
+   `constantize` + `public_send` on stored strings with no allowlist; this is that hole closed, and it stays
+   closed even if a careless endpoint lets someone write a row.
+2. **Payload validation at creation.** A typed schema checked when the request is made, rather than an
+   `ArgumentError` discovered weeks later by the person clicking Execute.
+3. **Approval policy is policy, not caller input.** Thresholds, permissions and quorum structure come from
+   the operation, which is why every `ChangeRequests.request!` call above is identical.
+4. **Snapshot-on-create.** The resolved workflow is frozen onto the request and materialised into stages and
+   quorums. Editing an operation never retroactively changes an in-flight request, and never leaves one
+   wrongly `approved` or wrongly `pending`.
+5. **Explicit retryability.** `idempotent` and `max_attempts` are per-action declarations, not an implicit
+   "failed requests can be retried forever".
+6. **Boot-time verification.** `rake change_requests:verify` (and `to_prepare` in dev/test) asserts every
+   service constant resolves, every action is a public singleton method, every schema key is an accepted
+   keyword of that method, every quorum's threshold suits its rule, and no `all_quorums` stage is
+   unsatisfiable. This is the fix for CC's validator/executor mismatch, where validation checked
+   `instance_methods` while execution called a class method - a first-five-minutes failure for anyone using
+   the ordinary `def self.call` idiom.
 
 **The service contract, documented explicitly** (neither source documented it, and both broke on it):
 
@@ -689,7 +1066,13 @@ Raises `ChangeRequests::UnknownAction`, `ChangeRequests::InvalidPayload`, or `Ch
 > effect is either transactional or idempotent. It receives `execution_token:` if it declares that keyword,
 > so external calls can carry an idempotency key.
 
+Errors a host will actually rescue: `ChangeRequests::UnknownOperation`, `InvalidPayload`, `NotAuthorized`, and
+the `TransitionError` family (§7).
+
 ## 7. Guards, commands, and the single source of truth
+
+> **Gem internals.** Nothing here is code a host writes - hosts only *call* the commands, as in §6.6.
+> This section is how they are built and why.
 
 ZZ's most instructive bug: `ChangeRequest#approvable_by?` (used by the UI) and
 `ChangeRequests::Approval` (the enforcement) checked *different* conditions, so the button and the service
@@ -704,11 +1087,16 @@ module ChangeRequests
       def allowed?  = reason.nil?
       def reason                      # nil when allowed, an i18n-able symbol/message otherwise
         return :not_pending      unless request.pending?
-        return :requester        if request.requester_id == actor.id && !config.requester_may_approve
-        return :already_decided  if current_stage.approvals.exists?(approver_id: actor.id)
-        return :not_permitted    unless authorization.allows?(actor:, request:, stage: current_stage, action: :approve)
+        return :requester        if same_person?(request.requester, actor) && !config.requester_may_approve
+        return :stage_not_current unless stage == request.current_stage
+        return :already_decided  if stage.approvals.exists?(approver_type:, approver_id:)
+        return :not_permitted    if eligible_quorums.empty?
         nil
       end
+
+      # the quorums of the current stage this actor qualifies for - the same predicate
+      # Request.awaiting_approval_from runs in SQL (§5.2a)
+      def eligible_quorums = stage.quorums.pending.select { authorization.allows?(actor:, quorum: _1) }
       def check! = allowed? || raise(NotApprovable.new(request:, reason:))
     end
   end
@@ -722,9 +1110,11 @@ module ChangeRequests
       def call(comment: nil)
         request.with_lock do                       # SELECT … FOR UPDATE, as ZZ does
           Guards::Approve.new(request:, actor:).check!
-          approval = current_stage.approvals.create!(approver_id: actor.id, decision: "approved", comment:)
-          emit(:approved, metadata: { stage: current_stage.name })
-          advance_workflow!                        # satisfy stage, advance position, maybe → approved
+          guard    = Guards::Approve.new(request:, actor:)
+          approval = current_stage.approvals.create!(**actor_ref(actor), decision: "approved", comment:)
+          approval.quorums = guard.countable_quorums   # honours distinct_approvers; §5.2a
+          emit(:approved, metadata: { stage: current_stage.name, quorums: approval.quorums.map(&:name) })
+          advance_workflow!                        # satisfy quorums → stage → position, maybe → approved
           request
         end
       end
@@ -754,15 +1144,15 @@ error paths returned HTTP 500 because only one class was rescued:
 
 ```
 ChangeRequests::Error
-├── ConfigurationError            (no actor types registered, invalid registry)
+├── ConfigurationError            (no actor types registered, invalid catalogue)
 ├── UnknownActorType              (an actor whose class is not registered)
-├── UnknownAction
+├── UnknownOperation
 ├── InvalidPayload                (=> details hash)
 ├── NotAuthorized
 ├── TransitionError
 │   ├── NotApprovable  ├── NotUnapprovable  ├── NotRejectable
 │   ├── NotExecutable  ├── NotCancelable    ├── AlreadyFinalized
-│   └── QuorumNotMet
+│   ├── QuorumNotMet   └── OverrideNotPermitted
 ├── ExecutionError
 │   ├── TargetFailed              (wraps the original; #cause preserved)
 │   ├── AttemptsExhausted
@@ -775,6 +1165,8 @@ controller `rescue_from ChangeRequests::Error` once, and hosts get a flash inste
 
 ## 8. Execution safety
 
+> **Gem internals.** Host-facing usage is §6.6 (execute) and §6.10 (override).
+
 CC had **no locking at all** - two concurrent `POST /execute` both passed `executable?` and both invoked
 the service. ZZ locked correctly but held `SELECT … FOR UPDATE` across the target invocation, including
 outbound HTTP.
@@ -782,13 +1174,14 @@ outbound HTTP.
 Both problems are solved by splitting execution into three transactions:
 
 ```
-T1  with_lock:  Guards::Execute.check!
-                status pending→executing (conditional UPDATE … WHERE status IN ('approved','failed'))
+T1  with_lock:  Guards::Execute.check!(override:)
+                status →executing (conditional UPDATE … WHERE status IN ('approved','failed'),
+                                   or WHERE status = 'pending' for an override; §8.1)
                 attempts_count += 1; create Attempt(number:, execution_token: SecureRandom.uuid)
                 emit(:execution_started)
                 COMMIT  ← the claim is now visible to every other process
 
-T2  no lock:    Dispatcher.call(action_key:, payload:, execution_token:)
+T2  no lock:    Dispatcher.call(operation_key:, payload:, execution_token:)
                 ← may take seconds, may call an external API, holds no row lock
 
 T3  with_lock:  success → executed_at, executer_id, status=successful, attempt.outcome=succeeded, emit(:executed)
@@ -806,7 +1199,7 @@ of the failure.
 
 Additional guarantees:
 
-- **Retry ceiling.** `retryable?` is `failed? && registry_action.idempotent? && attempts_count < max_attempts`.
+- **Retry ceiling.** `retryable?` is `failed? && operation.idempotent? && attempts_count < max_attempts`.
   CC and ZZ both allowed unbounded retries of a non-idempotent side effect.
 - **Idempotency token.** Each attempt carries an `execution_token`; targets that declare an
   `execution_token:` keyword receive it and can dedupe against a payment provider or webhook endpoint.
@@ -822,10 +1215,58 @@ Additional guarantees:
 **Separation of duties** becomes explicit configuration rather than an accident:
 
 ```ruby
-config.requester_may_approve = false   # hard-wired false; setting true raises ConfigurationError
-config.requester_may_execute = false   # ZZ's spec asserted true; defensible, but must be a choice
-config.approver_may_execute  = true
+config.requester_may_approve  = false  # hard-wired false; setting true raises ConfigurationError
+config.requester_may_execute  = false  # ZZ's spec asserted true; defensible, but must be a choice
+config.approver_may_execute   = true
+config.requester_may_override = false  # hard-wired false - see §8.1
 ```
+
+### 8.1 Override - executing without the required approvals
+
+> **Gem internals.** Host-facing usage - the two lines you actually write - is §6.10.
+
+The deliberate escape hatch, and the one place the gem's central promise is suspended. It exists because
+the alternative is worse: without it, a real outage is handled by someone editing the database, which
+leaves no record at all.
+
+Off by default, declared per action, separately permissioned, and taken only via an explicit
+`override: true`. An actor who could execute normally does so; the override is never reached by accident
+and never silently.
+
+**Why this rather than a one-admin quorum.** Both let an admin move a request that lacks its approvals, but
+they claim different things. A quorum says *"an admin's approval is sufficient"* - that is the rule, and the
+resulting record is an ordinary `approved` request, indistinguishable from any other. An override says
+*"two approvals are required and an admin proceeded anyway"* - that is an exception, and it should look
+like one. For a gem whose pitch is the four-eyes principle, "the exception is indistinguishable from the
+rule" is the wrong default. Use a quorum when the shortcut *is* the policy (§6.9c); use an override when it
+is a breach of policy that someone is accountable for.
+
+**What it records.** `overridden_at` on the request makes it a one-column query
+(`WHERE overridden_at IS NOT NULL`) and lets the presenter render a badge without loading events. Who and
+why live in an `overridden` event emitted **at claim time**, inside T1, carrying the shortfall exactly as it
+stood at that moment:
+
+```ruby
+kind:     "overridden",
+body:     "Payment provider outage, CFO approved by phone",
+metadata: { approvals_present: 1, approvals_required: 2,
+            incomplete_stages: ["operational"], incomplete_quorums: ["owners"] }
+```
+
+Recording it at claim time matters: a later approval must not be able to make an override look
+retrospectively unnecessary.
+
+**Guarding it.** `Guards::Execute` gains an override branch - `override_allowed?` requires the action to
+declare `op.override`, the actor to satisfy those permissions, and a reason when `require_reason`. The
+request must be non-final and not already `executing`. `config.requester_may_override` is hard-wired
+`false`: a requester who can override their own request has not been slowed down by the gem at all, which
+is a total bypass rather than an exception to the rule.
+
+**Surfacing it.** A separate `Value::Action(name: :execute_override, tone: :danger, confirm: …)`, so it is a
+visibly different, always-confirmed button rather than the normal Execute quietly lighting up; the status
+pill afterwards carries `tone: :warning` and a tooltip naming the shortfall. `overridden` is the single
+event most worth alerting on - the README recommends wiring it to Slack or email on day one, and it is the
+worked example in `docs/08_events_and_notifications.md`.
 
 ## 9. Authorization and identity
 
@@ -891,9 +1332,9 @@ Three distinct concerns, deliberately separated:
    ```
 
    The default `Permissions` policy resolves the actor's permission set via that actor type's registered
-   `permissions` lambda and checks it against the stage's permission rows (§5.2a) - so `User` and `Admin` can
+   `permissions` lambda and checks it against the quorum's permission rows (§5.2a) - so `User` and `Admin` can
    derive their permissions completely differently and still be compared against one stage definition.
-Both matching semantics ship, but as a **per-stage** setting rather than an app-wide one, because
+Both matching semantics ship, but as a **per-quorum** setting rather than an app-wide one, because
    identical rows mean opposite things under each (§5.2a). ZZ's AND-of-all-roles is a narrow default;
    `config.default_permission_match = :any` supplies the default and every stage may override it.
 
@@ -901,7 +1342,7 @@ Both matching semantics ship, but as a **per-stage** setting rather than an app-
    app: several actor classes (`Admin`, `Editor`, `Manager`), a single class carrying roles, or a mix of
    the two in one workflow - see the 2×2 in §5.2a.
 
-   Named approvers (`change_request_stage_eligible_actors` rows) are OR-ed with the permission check when
+   Named approvers (`change_request_quorum_eligible_actors` rows) are OR-ed with the permission check when
    present - and because both are rows, the same predicate serves the guard *and* the inbox query in §5.2a,
    so "the button is enabled" and "it appears in my inbox" cannot drift apart.
 
@@ -911,6 +1352,21 @@ Both matching semantics ship, but as a **per-stage** setting rather than an app-
    it to **both** `index` and `show` - ZZ's `show` was an IDOR on any UUID because tenant scoping was
    applied to neither. Ship a request spec that asserts a cross-tenant `show` 404s; that is the test that
    would have caught it.
+
+4. **Is this the same human twice?** Optional, off by default. Enforcement keys on
+   `(approver_type, approver_id)`, which is airtight inside one actor class but blind across classes - the
+   gem cannot know that `Admin#7` and `User#99` are the same person. Hosts that *do* carry a shared
+   identity can say so:
+
+   ```ruby
+   config.actor_identity = ->(actor) { actor.person_id }   # or email, or the SSO subject
+   ```
+
+   The result is snapshotted onto each approval as `approver_identity` (§5.3) and, when configured, used in
+   place of `(type, id)` by `distinct_approvers` **and** by the requester-cannot-approve rule. That second
+   use is the important one: without it, requesting as `User#99` and approving as `Admin#7` defeats
+   four-eyes silently, which is a worse failure than a miscounted quorum because it is the gem's central
+   promise. Unset, behaviour is unchanged and the limitation is documented rather than hidden.
 
 Pundit and ActionPolicy get **documented recipes in `docs/04_authorization.md`, not gem dependencies.**
 
@@ -949,11 +1405,13 @@ ChangeRequests.configure do |config|
 
   # ── authorization ────────────────────────────────────────────────────────
   config.authorization        = ChangeRequests::Authorization::Permissions.new
-  config.default_permission_match = :any        # per-stage override in the registry
+  config.default_permission_match = :any        # per-quorum override in the operation
+  config.actor_identity           = nil         # ->(actor) { actor.person_id } - see §9.4
 
   # ── separation of duties ─────────────────────────────────────────────────
-  config.requester_may_execute = false
-  config.approver_may_execute  = true
+  config.requester_may_execute  = false
+  config.approver_may_execute   = true
+  config.requester_may_override = false         # hard-wired; §8.1
 
   # ── execution ────────────────────────────────────────────────────────────
   config.execution_mode        = :inline        # :inline | :background
@@ -983,6 +1441,9 @@ Every UI key is inert when `mount_ui` is false, so a headless adopter never has 
 
 ## 11. Presenters - the load-bearing layer
 
+> **Mixed audience.** The presenter *API* below is host-facing - it is what you render against, as in §6.8.
+> How it is assembled, and why, is internal.
+
 **Do this even if the gem never ships.** It is the piece that makes the UI testable without rendering, gives
 a JSON API for free, fixes the model/service/UI drift, and makes every renderer below it a thin adapter.
 
@@ -990,20 +1451,26 @@ a JSON API for free, fixes the model/service/UI drift, and makes every renderer 
 p = ChangeRequests::RequestPresenter.new(request, actor:, routes: view)
 
 p.title                # "Update roles for member 8f2c…"
-p.action_key           # "members.update_roles"
+p.operation_key        # "members.update_roles"
 p.requester            # ActorRef - #label, #deleted?, #path; never a raw UUID
 p.executer             # ActorRef or nil
 p.status               # Value::Status(key: :failed, label: "Failed", tone: :danger,
                        #               tooltip: "Timeout calling provider")
-p.stages               # [ Value::StageProgress(name: "peer",  label:, required: 1, approved: 1,
-                       #                        satisfied?: true,  approvers: ["Ada"], current?: false),
-                       #   Value::StageProgress(name: "owner", label:, required: 2, approved: 0,
-                       #                        satisfied?: false, approvers: [],      current?: true) ]
+p.stages               # [ Value::StageProgress(name: "operational", satisfied?: true, current?: false,
+                       #       satisfied_by: :all_quorums, satisfied_via: "owners",
+                       #       quorums: [ Quorum(name: "admin",  required: 1, approved: 1, approvers: ["Edith"]),
+                       #                  Quorum(name: "owners", required: 2, approved: 2, approvers: ["Ada","Grace"]) ]),
+                       #   Value::StageProgress(name: "director", satisfied?: false, current?: true,
+                       #       remaining_options: ["1 from Directors"],
+                       #       quorums: [ Quorum(name: "default", required: 1, approved: 0) ]) ]
 p.actions              # [ Value::Action(name: :approve, label: "Approve", enabled: true,
                        #                 reason: nil, method: :post, path: "/change_requests/…/approve",
                        #                 confirm: nil, tone: :primary),
                        #   Value::Action(name: :execute, label: "Execute", enabled: false,
-                       #                 reason: "Needs 2 more approvals from Owner", …) ]
+                       #                 reason: "Needs 2 more approvals from Owners, or 1 from Admins"),
+                       #   Value::Action(name: :execute_override, label: "Execute without approval",
+                       #                 enabled: true, tone: :danger, requires_reason: true,
+                       #                 confirm: "This bypasses 2 required approvals. Continue?") ]
 p.timeline             # ordered Value::TimelineEntry - one per event row, actor-labelled, i18n'd
 p.payload_rows         # [[label, formatted_value], …]  - honours config.payload_renderer
 p.as_json              # the full contract, stable and versioned
@@ -1026,6 +1493,9 @@ Key properties:
 - **Deleted actors degrade, never raise.** `ActorRef#label` falls back to the snapshot and `#deleted?`
   becomes true, so `_actor.html.erb` renders "Ada Lovelace (deleted)" with no link. A view spec asserts
   exactly this against a request whose actor row has been hard-deleted.
+- **An OR-stage renders honestly.** `remaining_options` turns a half-satisfied `any_quorum` stage into
+  "2 more from Owners, **or** 1 from Admins" rather than a single misleading "1/2" - the one place a naive
+  progress bar actively lies to the reader.
 - **No ActionView dependency.** `routes:` is an optional injected url-helper object; when absent, `path` is
   nil and `as_json` still works. This keeps presenters in the domain core, usable from a JSON API or a
   background job.
@@ -1112,24 +1582,26 @@ forked; every other partial keeps receiving upstream fixes.
 This only works if the partial inventory and its locals are a **documented, semver-covered contract**. That
 document is the single most valuable piece of view support in the plan:
 
-| Partial                    | Locals                                  | Purpose                                     |
-|----------------------------|-----------------------------------------|---------------------------------------------|
-| `index.html.erb`           | `collection:` (CollectionPresenter)     | page shell                                  |
-| `_filters.html.erb`        | `filters:`, `url:`                      | status / action_key / requester filters     |
-| `_table.html.erb`          | `collection:`                           | `<thead>` + one `<tr>` per row              |
-| `_row.html.erb`            | `request:` (RequestPresenter)           | one request                                 |
-| `_status.html.erb`         | `status:` (Value::Status)               | the pill                                    |
-| `_stage_progress.html.erb` | `stages:` (Array<Value::StageProgress>) | "1/1 peer · 0/2 owner"                      |
-| `_actions.html.erb`        | `actions:` (Array<Value::Action>)       | the button group                            |
-| `_action_button.html.erb`  | `action:`                               | one button, enabled or disabled-with-reason |
-| `show.html.erb`            | `request:`                              | detail page shell                           |
-| `_payload.html.erb`        | `request:`                              | payload table                               |
-| `_timeline.html.erb`       | `entries:`                              | the audit trail                             |
-| `_timeline_entry.html.erb` | `entry:`                                | one event                                   |
-| `_comment_form.html.erb`   | `request:`, `url:`                      | add a comment                               |
+| Partial                    | Locals                                  | Purpose                                       |
+|----------------------------|-----------------------------------------|-----------------------------------------------|
+| `index.html.erb`           | `collection:` (CollectionPresenter)     | page shell                                    |
+| `_filters.html.erb`        | `filters:`, `url:`                      | status / operation / requester filters        |
+| `_table.html.erb`          | `collection:`                           | `<thead>` + one `<tr>` per row                |
+| `_row.html.erb`            | `request:` (RequestPresenter)           | one request                                   |
+| `_status.html.erb`         | `status:` (Value::Status)               | the pill                                      |
+| `_stage_progress.html.erb` | `stages:` (Array<Value::StageProgress>) | "1/1 admin · 2/2 owners → director"           |
+| `_quorum.html.erb`         | `quorum:` (Value::Quorum)               | one counting rule inside a stage              |
+| `_override_form.html.erb`  | `request:`, `url:`                      | the danger path; reason field (§8.1)          |
+| `_actions.html.erb`        | `actions:` (Array<Value::Action>)       | the button group                              |
+| `_action_button.html.erb`  | `action:`                               | one button, enabled or disabled-with-reason   |
+| `show.html.erb`            | `request:`                              | detail page shell                             |
+| `_payload.html.erb`        | `request:`                              | payload table                                 |
+| `_timeline.html.erb`       | `entries:`                              | the audit trail                               |
+| `_timeline_entry.html.erb` | `entry:`                                | one event                                     |
+| `_comment_form.html.erb`   | `request:`, `url:`                      | add a comment                                 |
 | `_actor.html.erb`          | `actor:` (ActorRef, or nil)             | actor seam; handles deleted and system actors |
-| `_datetime.html.erb`       | `time:`, `format:`                      | timestamp seam                              |
-| `_empty.html.erb`          | -                                       | empty state                                 |
+| `_datetime.html.erb`       | `time:`, `format:`                      | timestamp seam                                |
+| `_empty.html.erb`          | -                                       | empty state                                   |
 
 Every partial takes **presenter objects or value objects, never ActiveRecord models**. That is what makes the
 contract stable: the gem can restructure its schema without breaking a host's overridden partial.
@@ -1187,14 +1659,14 @@ suite for free.
 
 ## 13. Generators and templates
 
-| Generator                                   | Produces                                                                                     |
-|---------------------------------------------|----------------------------------------------------------------------------------------------|
-| `change_requests:install`                   | initializer, registry initializer, migrations, optional spec-support file, README next-steps |
-| `change_requests:action NAME`               | a registry entry stub + a target service stub + its spec                                     |
-| `change_requests:controller`                | a subclass of `ChangeRequests::RequestsController` for host overrides                        |
-| `change_requests:views [--only] [--list]`   | ejects ERB partials                                                                          |
-| `change_requests:scaffold_ui [--namespace]` | host-namespaced controller + views                                                           |
-| `change_requests:migration_upgrade`         | schema migrations between gem majors                                                         |
+| Generator                                   | Produces                                                                                       |
+|---------------------------------------------|------------------------------------------------------------------------------------------------|
+| `change_requests:install`                   | initializer, operations initializer, migrations, optional spec-support file, README next-steps |
+| `change_requests:operation NAME`            | an operation stub + a target service stub + its spec                                           |
+| `change_requests:controller`                | a subclass of `ChangeRequests::RequestsController` for host overrides                          |
+| `change_requests:views [--only] [--list]`   | ejects ERB partials                                                                            |
+| `change_requests:scaffold_ui [--namespace]` | host-namespaced controller + views                                                             |
+| `change_requests:migration_upgrade`         | schema migrations between gem majors                                                           |
 
 Install generator options:
 `--primary-key-type=uuid --actor-types=User,Admin --tenant-types=Organization --skip-tenant
@@ -1208,7 +1680,7 @@ way. Adding a fourth actor class later is an initializer edit, never a migration
 Templates shipped (`lib/generators/change_requests/*/templates/`):
 
 - `initializer.rb.tt` - every config key, commented, with the chosen actor/tenant filled in
-- `registry.rb.tt` - one worked example action, commented
+- `operations.rb.tt` - one worked example action, commented
 - `create_change_requests.rb.tt` - all five tables, FKs **between the gem's own tables only**, CHECK
   constraints, composite `(type, id)` indexes on every actor reference, partial indexes; correct PK type
 - `controller.rb.tt` - subclass stub showing how to override `find_requests`, `actor`, `after_command`
@@ -1216,7 +1688,7 @@ Templates shipped (`lib/generators/change_requests/*/templates/`):
 - `en.yml.tt` - a copy of the gem's locale file for hosts that want to edit rather than override
 - `_*.html.erb` - the ERB partial set (for the views generator)
 - `action.rb.tt` / `action_spec.rb.tt` - a service stub with the correct singleton-keyword-argument shape,
-  and a spec that already includes `it_behaves_like "a registered change request action"`
+  and a spec that already includes `it_behaves_like "a registered change request operation"`
 
 **Packaging note, learned from CC:** its `spec.files` glob omitted `templates/`, so both generators
 resolved `source_root` to a directory that did not exist in the packaged gem - they worked only because it
@@ -1236,26 +1708,29 @@ require "change_requests/rspec"
 ### 14.1 Shared contexts
 
 ```ruby
-include_context "with change requests"            # config isolation, registry sandbox, cleanup
+include_context "with change requests"            # config isolation, operation sandbox, cleanup
 include_context "with an approved change request" # fast-forwards a request past its whole workflow
 ```
 
-### 14.2 Registry sandboxing
+### 14.2 Operation sandboxing
 
 ```ruby
-ChangeRequests::Testing.registry_sandbox do |registry|
-  registry.action("test.noop") { |a| a.service = "TestTarget"; a.action = :call
-                                     a.approvals permissions: %w(admin), required: 1 }
-  # …
-end                                                # original registry restored afterwards
+ChangeRequests::Testing.operations_sandbox do |catalog|
+  catalog.define("test.noop") do |op|
+    op.service    = "TestTarget"
+    op.methodname = :call
+    op.approvals permissions: %w(admin), required: 1
+  end
+end                                                # original catalogue restored afterwards
 ```
 
-Prevents host specs from mutating the real registry, and lets domain specs run without the host's actions.
+Prevents host specs from mutating the real catalogue, and lets domain specs run without the host's
+operations.
 
 ### 14.3 Builders (no FactoryBot required)
 
 ```ruby
-ChangeRequests::Testing.build_request(action_key: "test.noop", requester: user, payload: {})
+ChangeRequests::Testing.build_request(operation_key: "test.noop", requester: user, payload: {})
 ChangeRequests::Testing.actor_type_sandbox { |c| c.actor_type("TestActor") { |t| … } }
 ChangeRequests::Testing.orphan_actors!(request)   # hard-deletes the actor rows, keeps the snapshots
 ChangeRequests::Testing.approve_fully!(request, approvers: [alice, bob])   # satisfies every stage
@@ -1275,19 +1750,21 @@ expect(request).to have_change_request_status(:approved)
 expect(request).to have_stage(:owner).with_approvals(2)
 expect(request.requester).to be_deleted_actor.with_label("Ada Lovelace")
 expect(request).to be_awaiting_approval_from(editor)      # inbox and guard, asserted together
+expect(request).to have_quorum("owners").with_approvals(2)
+expect { override }.to emit_change_request_event(:overridden).with_metadata(approvals_required: 2)
 expect(ChangeRequests.config).to have_registered_actor_type("Admin")
 expect { command }.to emit_change_request_event(:executed).with_actor(carol)
 expect { command }.to change_request_status_from(:approved).to(:successful)
 expect(presenter.actions).to include_enabled_action(:approve)
-expect(ChangeRequests.registry).to have_registered_action("members.update_roles")
+expect(ChangeRequests.operations).to have_registered_operation("members.update_roles")
 ```
 
 ### 14.5 Shared examples - the highest-value item
 
 ```ruby
-# In the host app, once per registered action. Proves the registry is sound before production does.
+# In the host app, once per declared operation. Proves the catalogue is sound before production does.
 RSpec.describe "members.update_roles" do
-  it_behaves_like "a registered change request action", "members.update_roles"
+  it_behaves_like "a registered change request operation", "members.update_roles"
 end
 ```
 
@@ -1314,7 +1791,7 @@ Also shipped:
 
 ```ruby
 ChangeRequests::Testing.inline_execution!    # force :inline even when config is :background
-ChangeRequests::Testing.freeze_registry!     # raise on any registry mutation (CI safety)
+ChangeRequests::Testing.freeze_operations!     # raise on any catalogue mutation (CI safety)
 ChangeRequests::Testing.capture_events { … } # => Array<Event>, without hitting config.on_event
 ```
 
@@ -1344,16 +1821,21 @@ generators, views, configuration, and the model validations - was untested, and 
 that untested territory. Required areas:
 
 - models (validations, terminal-state guard, readonly attributes, event immutability)
-- registry (verification, payload schema, snapshotting, unknown-action rejection)
+- operation catalogue (verification, payload schema, snapshotting, unknown-operation rejection)
 - guards (a truth table per guard × status × actor role - table-driven, one `where` per row)
 - commands (happy path, every guard rejection, event emission, workflow advancement)
-- workflow (sequential and parallel stages; `n_of`, `all_of`, `percent`, `any`; unapproval demoting a
-  satisfied stage; rejection short-circuiting a sequential workflow)
+- workflow (sequential stages; `any_quorum` / `all_quorums`; `n_of`, `all_of`, `percent`, `any`;
+  unapproval demoting a satisfied quorum and with it the stage; rejection short-circuiting the workflow;
+  `distinct_approvers` under `all_quorums` with an actor qualifying for two quorums) - plus each of the
+  four §6.9 shapes end-to-end, since those are the examples in the docs and must not rot
 - eligibility (the full 2×2 of nullable `permission` × `actor_type`, under both `match` modes, across all
   three dummy actor classes; the CHECK rejecting a doubly-NULL row; named approvers OR-ed in) - and a spec
   asserting `Guards::Approve` and `Request.awaiting_approval_from` agree on every cell, since that
   agreement is the whole reason eligibility is rows
 - execution (success, target raises, retry ceiling, non-idempotent refusal, token propagation, reaper)
+- override (refused when the action declares none; refused for the requester; refused without a reason when
+  required; `overridden_at` set; the `overridden` event's shortfall snapshot matching the state *at claim
+  time* and not being rewritten by a later approval)
 - presenters (actions match guards for every status × actor combination; `as_json` schema snapshot)
 - controllers/routes (opt-in route list, tenant scoping on **index and show**, error taxonomy → flash,
   Turbo and non-Turbo responses)
@@ -1431,36 +1913,38 @@ Plus a static check that no file under the domain directories mentions `ActionCo
 
 ### New - required for 1.0
 
-| Feature                                                                                | Replaces / solves                                                                                            |
-|----------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
-| **Action registry** (allowlist + schema + policy + retry declaration)                  | unrestricted `constantize`; caller-supplied quorum; unvalidated payloads; the class/instance method mismatch |
-| **Staged M-to-N workflows** (`sequential`/`parallel`, `n_of`/`all_of`/`percent`/`any`) | flat quorum in ZZ, 1-of-N in CC                                                                              |
-| **`change_request_events` table**                                                      | CC's mutable `comment` varchar; ZZ's jsonb array and its symbol/string-key bug                               |
-| **`rejected` status with a reason**                                                    | neither had a way to say "no"                                                                                |
-| **`executing` status + attempts table + claim-then-invoke**                            | double execution; FOR UPDATE held across HTTP                                                                |
-| **Idempotency tokens + retry ceiling**                                                 | unbounded retries of non-idempotent side effects                                                             |
-| **Error taxonomy**                                                                     | one rescued class; failed executions rendering a 500                                                         |
-| **Guards shared by commands and presenters**                                           | UI/enforcement drift                                                                                         |
-| **Presenters + JSON contract**                                                         | logic in templates; no API surface                                                                           |
-| **Authorization adapter; gem-resolved permissions**                                    | the permission tautology; a hardcoded role model                                                             |
-| **Polymorphic actors chosen per request, no FKs, snapshotted labels**                  | CC's typeless raw UUIDs; ZZ's single hardcoded `Member` FK; views breaking on a deleted actor                |
-| **`payload_labels` + `title` snapshots**                                               | show pages going blank once the referenced record is destroyed                                               |
-| **Visibility scoping applied to index *and* show**                                     | the cross-tenant IDOR                                                                                        |
-| **ERB views + class contract + six-tier override story**                               | Haml dependency; Phlex/DaisyUI coupling; fork-to-customise                                                   |
-| **Approver inbox scope** (`Request.awaiting_approval_from(actor)`)              | neither source could answer "what is waiting for me"                                                 |
-| **Expiry, `expires_at`, sweeper**                                                      | requests pending forever                                                                                     |
-| **Notifications: `config.on_event` + `ActiveSupport::Notifications`**                  | approvers never told a request exists                                                                        |
-| **`executed_at` actually written**                                                     | rendered but permanently blank in ZZ                                                                         |
-| **Host test kit** (§14)                                                                | neither shipped anything                                                                                     |
-| **Pagination, filtering, sorting on index**                                            | dead `filter_by_state`; commented-out `pagy`                                                                 |
-| **I18n throughout**                                                                    | hardcoded English                                                                                            |
-| **Optional `ChangeRequests::Actor` concern**                                           | -                                                                                                            |
-| **Maintenance rake tasks** (`expire`, `reap`, `verify`)                                | -                                                                                                            |
+| Feature                                                                   | Replaces / solves                                                                                            |
+|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| **Operation catalogue** (allowlist + schema + policy + retry decl.)       | unrestricted `constantize`; caller-supplied quorum; unvalidated payloads; the class/instance method mismatch |
+| **Staged M-to-N workflows** (sequential stages of AND/OR-ed quorums)      | flat quorum in ZZ, 1-of-N in CC; neither could express "1 Admin or 2 Owners"                                 |
+| **Override execute** (`op.override`, `overridden_at`, `overridden` event) | break-glass previously done by editing the database, leaving no record                                       |
+| **Optional `config.actor_identity`**                                      | one human approving twice through two actor classes                                                          |
+| **`change_request_events` table**                                         | CC's mutable `comment` varchar; ZZ's jsonb array and its symbol/string-key bug                               |
+| **`rejected` status with a reason**                                       | neither had a way to say "no"                                                                                |
+| **`executing` status + attempts table + claim-then-invoke**               | double execution; FOR UPDATE held across HTTP                                                                |
+| **Idempotency tokens + retry ceiling**                                    | unbounded retries of non-idempotent side effects                                                             |
+| **Error taxonomy**                                                        | one rescued class; failed executions rendering a 500                                                         |
+| **Guards shared by commands and presenters**                              | UI/enforcement drift                                                                                         |
+| **Presenters + JSON contract**                                            | logic in templates; no API surface                                                                           |
+| **Authorization adapter; gem-resolved permissions**                       | the permission tautology; a hardcoded role model                                                             |
+| **Polymorphic actors chosen per request, no FKs, snapshotted labels**     | CC's typeless raw UUIDs; ZZ's single hardcoded `Member` FK; views breaking on a deleted actor                |
+| **`payload_labels` + `title` snapshots**                                  | show pages going blank once the referenced record is destroyed                                               |
+| **Visibility scoping applied to index *and* show**                        | the cross-tenant IDOR                                                                                        |
+| **ERB views + class contract + six-tier override story**                  | Haml dependency; Phlex/DaisyUI coupling; fork-to-customise                                                   |
+| **Approver inbox scope** (`Request.awaiting_approval_from(actor)`)        | neither source could answer "what is waiting for me"                                                         |
+| **Expiry, `expires_at`, sweeper**                                         | requests pending forever                                                                                     |
+| **Notifications: `config.on_event` + `ActiveSupport::Notifications`**     | approvers never told a request exists                                                                        |
+| **`executed_at` actually written**                                        | rendered but permanently blank in ZZ                                                                         |
+| **Host test kit** (§14)                                                   | neither shipped anything                                                                                     |
+| **Pagination, filtering, sorting on index**                               | dead `filter_by_state`; commented-out `pagy`                                                                 |
+| **I18n throughout**                                                       | hardcoded English                                                                                            |
+| **Optional `ChangeRequests::Actor` concern**                              | -                                                                                                            |
+| **Maintenance rake tasks** (`expire`, `reap`, `verify`)                   | -                                                                                                            |
 
 ### Deliberately post-1.0
 
 Delegation / proxy approval · escalation and reminder schedules · conditional routing rules ("> €10k needs
-two approvals" - the registry can host it, but a rules DSL is a project of its own) · weighted or per-group
+two approvals" - an operation can host it, but a rules DSL is a project of its own) · weighted or per-group
 quorum · request templates / bulk approval · a transactional outbox beyond the attempts table · non-PostgreSQL
 adapters · Phlex and ViewComponent renderer gems · an admin dashboard with metrics.
 
@@ -1472,23 +1956,28 @@ Both ship in `docs/porting/`, each with a schema diff, a data-migration sketch a
 
 | CC                                                                    | Gem                                                                       |
 |-----------------------------------------------------------------------|---------------------------------------------------------------------------|
-| `permission` (PG enum, one value)                                     | `action_key` in the registry; permissions move to `stage.permissions`     |
+| `permission` (PG enum, one value)                                     | `operation_key` in the catalogue; permissions move to quorum rows         |
 | `approver_id` (single column)                                         | one `change_request_approvals` row                                        |
 | `comment` (append-only varchar)                                       | `change_request_events` rows                                              |
 | `ChangeRequests::Approval.call(request_id:, actor_id:, permissions:)` | `Commands::Approve.call(request:, actor:)`                                |
-| `config.permission_list`                                              | the registry                                                              |
+| `config.permission_list`                                              | the catalogue                                                             |
 | `config.current_actor_access_method = :current_admin`                 | `config.current_actor = ->(c) { c.current_admin }`                        |
 | `config.permissions_access_method`                                    | `t.permissions` on each registered actor type                             |
 | `config.routes = %i(…)`                                               | unchanged                                                                 |
 | `change_requests:views` + fork                                        | `config.actor_label` / `datetime_format` / `payload_renderer` (Tiers 2–3) |
 | Haml partials                                                         | ERB partials                                                              |
 
+CC has a single `approver_id` column, so every request becomes one stage holding one quorum
+(`rule: :n_of`, `threshold: 1`) with one permission row carrying CC's `permission` value and
+`actor_type: NULL`. Its `permission` enum values become the permission strings; the operation decides who
+holds them from then on.
+
 CC's three actor columns are bare UUIDs with **no type**, so the backfill must be told which class they
 belonged to: `actor_type: "Admin"` for the whole table, since CC only ever had one. Labels are backfilled by
 looking the actor up once, falling back to the raw UUID when the row is already gone - after which the
 snapshot is authoritative and the lookup never happens again.
 
-Data migration: derive `action_key` from a host-supplied `{ [service, action] => action_key }` mapping;
+Data migration: derive `operation_key` from a host-supplied `{ [service, method] => operation_key }` mapping;
 set `requester_type`/`executer_type` to the supplied class and cast the ids to string;
 `INSERT INTO change_request_approvals SELECT … WHERE approver_id IS NOT NULL`; split `comment` on `\n` into
 `commented` events with a null actor and `metadata: { imported: true }`; drop the two PG enum types last.
@@ -1497,22 +1986,25 @@ re-runnable task.
 
 ### 17.2 From the ZZ service
 
-Structurally much closer; the work is renames, the registry, and events.
+Structurally much closer; the work is renames, the operation catalogue, and events.
 
-| ZZ                                          | Gem                                                                                      |
-|---------------------------------------------|------------------------------------------------------------------------------------------|
-| `ChangeRequest`                             | `ChangeRequests::Request`                                                                |
-| `ChangeRequestApproval`                     | `ChangeRequests::Approval` (+ `change_request_stage_id`)                                 |
-| `ChangeRequests::Approval` (service)        | `ChangeRequests::Commands::Approve`                                                      |
-| `permissions` text[] + `required_approvals` | one `change_request_stages` row + `change_request_stage_permissions` rows per request     |
-| `comments` jsonb                            | `change_request_events` rows                                                             |
-| `organization_id` (FK)                      | `tenant_type` `"Organization"` + `tenant_id` string + `tenant_label` snapshot            |
+| ZZ                                            | Gem                                                                                          |
+|-----------------------------------------------|----------------------------------------------------------------------------------------------|
+| `ChangeRequest`                               | `ChangeRequests::Request`                                                                    |
+| `ChangeRequestApproval`                       | `ChangeRequests::Approval` (+ `change_request_stage_id`)                                     |
+| `ChangeRequests::Approval` (service)          | `ChangeRequests::Commands::Approve`                                                          |
+| `permissions` text[] + `required_approvals`   | one stage + one quorum + `change_request_quorum_permissions` rows per request                |
+| `comments` jsonb                              | `change_request_events` rows                                                                 |
+| `organization_id` (FK)                        | `tenant_type` `"Organization"` + `tenant_id` string + `tenant_label` snapshot                |
 | `belongs_to :requester, class_name: "Member"` | `requester_type` `"Member"` + `requester_id` string + `requester_label` snapshot; FK dropped |
-| Phlex components                            | ERB partials + presenters (the component logic maps almost 1:1 onto `Presenter#actions`) |
-| controller's `permissions` method           | deleted - the gem resolves permissions                                                   |
+| Phlex components                              | ERB partials + presenters (the component logic maps almost 1:1 onto `Presenter#actions`)     |
+| controller's `permissions` method             | deleted - the gem resolves permissions                                                       |
 
-Data migration: one stage per request (`position: 1`, `rule: :n_of`, `threshold: required_approvals`,
-`permissions:` copied); attach existing approvals to it; expand `comments` jsonb into event rows, mapping
+Data migration: one stage per request (`position: 1`, `satisfied_by: "any_quorum"`) holding one quorum
+(`rule: :n_of`, `threshold: required_approvals`, `permission_match: :all` - ZZ's semantics were AND-of-roles,
+so preserve that rather than silently loosening it), with `permissions` expanded into
+`change_request_quorum_permissions` rows carrying `actor_type: NULL`; attach existing approvals to the stage
+and link each to that single quorum; expand `comments` jsonb into event rows, mapping
 labels (`comment`→`commented`, `failure_reason`→`execution_failed`, `cancelation`→`canceled`,
 `unapproval`→`unapproved`) and reading with **string** keys, which is what the jsonb actually contains.
 
@@ -1527,20 +2019,20 @@ as its single actor type on day one and can add `User` or `Admin` later with no 
 Sequenced so that each milestone is independently releasable and the risky work lands early. Estimates
 assume one experienced developer familiar with both source implementations.
 
-| #       | Version   | Scope                                                                                                                                                                                                        | Effort |
-|---------|-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
-| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec runtime deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **The seam is proven before any domain code exists.**           | 3–4 d  |
-| **M1**  | 0.2.0     | Migrations + all five models; statuses incl. `rejected`; terminal-state guard; readonly attrs; events table; guards; commands (approve/unapprove/reject/cancel/comment); `with_lock`; single-stage workflow. | 5–7 d  |
-| **M2**  | 0.3.0     | Registry: allowlist, payload schema, workflow DSL, snapshot-on-create, `verify!`, `ChangeRequests.request!`, error taxonomy, `rake change_requests:verify`.                                                  | 4–5 d  |
-| **M3**  | 0.4.0     | Execution: `executing` status, attempts, claim-then-invoke, idempotency tokens, retry ceiling, background mode, reaper, expiry sweeper. **Concurrency specs.**                                               | 4–5 d  |
-| **M4**  | 0.5.0     | Actor-type registry, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`.                                                                                     | 2–3 d  |
-| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json` contract + schema snapshot spec.                                                                                                              | 3 d    |
-| **M6**  | 0.7.0     | Engine UI: base + requests controllers, routes, ERB partial set, helper module, i18n, optional stylesheet, pagination/filter/sort, Turbo-optional responses, `bin/demo`, view + request specs.               | 6–8 d  |
-| **M7**  | 0.8.0     | Generators (install, action, controller, views, scaffold_ui) + generator specs + the generate-on-a-real-app CI job.                                                                                          | 4 d    |
-| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`.                                                                                               | 3–4 d  |
-| **M9**  | 0.10.0    | Multi-stage M-to-N: `sequential`/`parallel`, `n_of`/`all_of`/`percent`/`any`, named approvers, stage rejection semantics, unapproval across stages, UI stage progress.                                       | 5–7 d  |
-| **M10** | 0.11.0    | Notifications (`on_event`, `ActiveSupport::Notifications`), JSON API controller, maintenance tasks.                                                                                                          | 2–3 d  |
-| **M11** | **1.0.0** | Docs set, both porting guides + backfill tasks, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release.                                                                                   | 4–5 d  |
+| #       | Version   | Scope                                                                                                                                                                                                                                        | Effort |
+|---------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|
+| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec runtime deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **The seam is proven before any domain code exists.**                                           | 3–4 d  |
+| **M1**  | 0.2.0     | Migrations + all five models; statuses incl. `rejected`; terminal-state guard; readonly attrs; events table; guards; commands (approve/unapprove/reject/cancel/comment); `with_lock`; single-stage workflow.                                 | 5–7 d  |
+| **M2**  | 0.3.0     | Operation catalogue: allowlist, payload schema, workflow DSL, snapshot-on-create, `verify!`, `ChangeRequests.request!`, error taxonomy, `rake change_requests:verify`.                                                                       | 4–5 d  |
+| **M3**  | 0.4.0     | Execution: `executing` status, attempts, claim-then-invoke, idempotency tokens, retry ceiling, background mode, reaper, expiry sweeper. **Concurrency specs.**                                                                               | 4–5 d  |
+| **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`.                                                                | 2–3 d  |
+| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json` contract + schema snapshot spec.                                                                                                                                              | 3 d    |
+| **M6**  | 0.7.0     | Engine UI: base + requests controllers, routes, ERB partial set, helper module, i18n, optional stylesheet, pagination/filter/sort, Turbo-optional responses, `bin/demo`, view + request specs.                                               | 6–8 d  |
+| **M7**  | 0.8.0     | Generators (install, action, controller, views, scaffold_ui) + generator specs + the generate-on-a-real-app CI job.                                                                                                                          | 4 d    |
+| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`.                                                                                                                               | 3–4 d  |
+| **M9**  | 0.10.0    | Multi-stage M-to-N: quorum evaluation (`any_quorum`/`all_quorums`, `n_of`/`all_of`/`percent`/`any`), `distinct_approvers`, named approvers, the inbox query, stage rejection semantics, unapproval across quorums, UI stage/quorum progress. | 5–7 d  |
+| **M10** | 0.11.0    | Notifications (`on_event`, `ActiveSupport::Notifications`), JSON API controller, maintenance tasks.                                                                                                                                          | 2–3 d  |
+| **M11** | **1.0.0** | Docs set, both porting guides + backfill tasks, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release.                                                                                                                   | 4–5 d  |
 
 **Total: roughly 8–10 focused weeks**, or 4–5 months at one day a week. Be honest about this in the README's
 roadmap; the graveyard in this niche is full of gems that promised more than one maintainer could sustain.
@@ -1551,7 +2043,7 @@ staged *evaluation logic and UI* can wait until the single-stage path is battle-
 
 ## 19. Cut line for 1.0
 
-**In:** registry, staged schema, events, `rejected`, execution safety, presenters, ERB UI with the six-tier
+**In:** the operation catalogue, staged schema, events, `rejected`, execution safety, presenters, ERB UI with the six-tier
 override story, generators, host test kit, PostgreSQL-only, Rails 7.1–8.1.
 
 **On other databases:** nothing ships and nothing is prepared - no adapter branches, no compatibility layer,
@@ -1578,15 +2070,13 @@ fits - and it is what protects the maintainer from the scope creep that ended ev
    source implementations, matches `update!` semantics, and pairs naturally with one `rescue_from` in the
    controller. Revisit if a real adopter wants Results; adding `Commands::Approve.result(...)` later is
    additive and non-breaking.
-4. **Is `parallel` stage mode needed at 1.0**, or is `sequential` enough? Sequential covers the common
-   "peers, then owners" case. `parallel` is ~a day of extra evaluation logic and UI. Suggest shipping the
-   column and the enum value at M1, and the behaviour at M9 only if wanted.
+4. ~~**Is `parallel` stage mode needed at 1.0?**~~ **Resolved: no - the column is gone.** Quorums make it
+   redundant and strictly less expressive; sequential stages of AND/OR-ed quorums cover every shape a
+   request-level flag could, and several it could not (§5.2).
 5. **Does the requester's own permission set gate creation**, or is any actor allowed to *request* anything
-   registered? **Recommendation: registry-optional `a.request_permissions`**, defaulting to unrestricted —
+   registered? **Recommendation: operation-optional `op.request_permissions`**, defaulting to unrestricted —
    the approval gate is the control, and over-restricting creation makes the feature unusable.
-6. **IP clearance for the CC lineage.** The CC engine was written on company time in a company
-   repository. Even though this plan is a rewrite rather than a copy, the design lineage is direct. Get
-   written sign-off before the first public push - it is cheap now and unfixable later.
+6. **IP clearance** IP lies completely with me.
 7. **Label freshness: `:live` or `:snapshot` by default?** `:live` (prefer the current record, fall back to
    the snapshot) reads better - a renamed user shows their new name. `:snapshot` is stricter audit
    semantics: the page shows who they were *at the time*, which is what a compliance reviewer usually
@@ -1599,9 +2089,20 @@ fits - and it is what protects the maintainer from the scope creep that ended ev
    `CollectionPresenter` already batch-resolves by type, which covers the case that matters. Revisit only
    if a profile says otherwise.
 
-9. **Gem name availability** on RubyGems for `change_requests` - confirm before M0 ends, since the name is
-   baked into table names, the namespace and every doc.
-10. **Announce the non-goal of record-diff approval loudly.** Nine of the ten existing gems approve an
+9. **Should `distinct_approvers` default to `true`?** It does here, and only affects `all_quorums` stages.
+   `true` matches the plain reading of "1 Admin and 2 Owners" (three people) and is the safer default for a
+   four-eyes gem; the cost is surprising a host that deliberately wanted one person to close two quorums.
+   **Recommendation: keep `true`**, per-stage overridable, and say so in the `all_quorums` docs.
+
+10. **Should the override require a second person?** As specified, one authorised actor overrides alone -
+    which is the point of break glass. A stricter variant ("an override needs two security officers") is
+    expressible today by giving the *action* a second workflow, but not by the override itself.
+    **Recommendation: leave it single-actor for 1.0** and let the loudness of the audit record be the
+    control. Revisit if an adopter in a regulated domain asks.
+
+11. **Gem name availability** `change_requests` - has been reserved on RubyGems by releasing a first version without implementation.
+
+12. **Announce the non-goal of record-diff approval loudly.** Nine of the ten existing gems approve an
    ActiveRecord diff; this one approves a command. Someone arriving from `approval` or `purgatory` needs to
    understand the difference in the first paragraph of the README, or the issue tracker fills with requests
    to become a different gem.
