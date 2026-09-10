@@ -11,7 +11,16 @@ module Subprocess
   # the output when the child fails, so a broken probe reads as a broken probe rather than as an
   # empty string that fails a later expectation.
   def ruby_probe(body)
-    output = IO.popen(["ruby", "-Ilib", "-e", body], err: %i(child out), &:read)
+    run_ruby("-e", body)
+  end
+
+  # Same, for a probe long enough to deserve its own file.
+  def ruby_script(path)
+    run_ruby(path)
+  end
+
+  def run_ruby(*arguments)
+    output = IO.popen(["ruby", "-Ilib", *arguments], err: %i(child out), &:read)
 
     fail "probe exited #{$CHILD_STATUS.exitstatus}:\n#{output}" unless $CHILD_STATUS.success?
 
