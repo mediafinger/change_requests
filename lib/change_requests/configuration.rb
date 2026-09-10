@@ -72,6 +72,16 @@ module ChangeRequests
 
     private
 
+    # A real copy, not a shallow one: `actor_type` reopens an existing registration in place, so
+    # sharing the hashes - or the registered objects in them - would share every mutation.
+    def initialize_copy(source)
+      super
+
+      @actor_types   = @actor_types.transform_values(&:dup)
+      @tenant_types  = @tenant_types.transform_values(&:dup)
+      @authorization = @authorization.dup
+    end
+
     def register(registry, klass, name)
       type = (registry[name.to_s] ||= klass.new(name))
       yield(type)
