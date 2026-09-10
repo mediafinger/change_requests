@@ -34,8 +34,8 @@ Gem::Specification.new do |spec|
   spec.files = IO.popen(%w(git ls-files -z), chdir: __dir__, err: IO::NULL) do |ls|
     ls.readlines("\x0", chomp: true).reject do |f|
       (f == gemspec) ||
-        f.start_with?(*%w(bin/ gemfiles/ tasks/ Gemfile .gitignore .rspec spec/ .github/ .rubocop.yml
-                          .ruby-version))
+        f.start_with?(*%w(bin/ gemfiles/ tasks/ Archspec.rb Gemfile .gitignore .rspec spec/ .github/
+                          .rubocop.yml .ruby-version))
     end
   end
   spec.bindir = "exe"
@@ -51,6 +51,7 @@ Gem::Specification.new do |spec|
 
   # general development and test dependencies
   spec.add_development_dependency "amazing_print",                  ">= 1.8"
+  spec.add_development_dependency "archspec",                       ">= 1.1"
   spec.add_development_dependency "bundler",                        ">= 2.2"
   spec.add_development_dependency "bundler-audit",                  ">= 0.9"
   spec.add_development_dependency "irb",                            ">= 1.15"

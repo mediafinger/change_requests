@@ -58,12 +58,19 @@ end
 
 RuboCop::RakeTask.new
 
+# The architecture in PLAN.md §1 and §2, checked statically - see Archspec.rb for the rules. It
+# parses rather than boots, so it needs no database and no dummy application.
+desc "Check the architecture boundaries in Archspec.rb"
+task :archspec do
+  sh "archspec", "check"
+end
+
 desc "Open a console with ChangeRequests loaded"
 task :console do
   sh "bin/console"
 end
 
-desc "Run rubocop and the specs and check for known CVEs"
-task ci: %i(rubocop rspec bundle:audit)
+desc "Run rubocop, the architecture checks and the specs, and check for known CVEs"
+task ci: %i(rubocop archspec rspec bundle:audit)
 
 task default: :ci

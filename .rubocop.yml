@@ -19,6 +19,10 @@ RSpec:
     - spec/dummy/**/*
     - spec/integration/headless_script.rb
 
+Naming/FileName:
+  Exclude:
+    - Archspec.rb # named by the tool that reads it, like Gemfile and Rakefile
+
 Gemspec/DevelopmentDependencies:
   EnforcedStyle: gemspec
 

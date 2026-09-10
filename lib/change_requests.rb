@@ -75,4 +75,9 @@ ChangeRequests.setup_loader
 
 # Rails integration is opt-in by presence: a host that has Rails gets the engine, a rake task or a
 # bare ActiveRecord connection gets the domain core and nothing else (§1, §2).
+#
+# The one reference to Rails the domain is allowed, because it is the reference that *implements*
+# the rule rather than breaking it: `defined?` never raises on a missing constant, so this line is
+# what keeps Rails optional.
+# archspec:disable-next-line constants.forbid -- the guard that makes the Rails layer opt-in (§1)
 require_relative "change_requests/engine" if defined?(Rails::Engine)
