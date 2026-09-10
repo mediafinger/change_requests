@@ -52,6 +52,7 @@ Gem::Specification.new do |spec|
   # general development and test dependencies
   spec.add_development_dependency "amazing_print",                  ">= 1.8"
   spec.add_development_dependency "archspec",                       ">= 1.1"
+  spec.add_development_dependency "brakeman",                       ">= 7.0"
   spec.add_development_dependency "bundler",                        ">= 2.2"
   spec.add_development_dependency "bundler-audit",                  ">= 0.9"
   spec.add_development_dependency "irb",                            ">= 1.15"
