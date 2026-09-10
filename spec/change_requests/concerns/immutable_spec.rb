@@ -58,9 +58,7 @@ RSpec.describe ChangeRequests::Concerns::Immutable do
     expect { probe.save! }.to raise_error(/ImmutableProbe rows/)
   end
 
-  # `touch` and `update_columns` go straight to an UPDATE without running `before_update`. Documented
-  # rather than defended, like the same hole in ReadonlyAttributes: neither is anybody's accident,
-  # and a gem cannot lock a database it does not own.
+  # touch and update_columns skip before_update. Documented, not defended.
   it "does not defend against touch, which bypasses callbacks on purpose" do
     expect { probe.touch }.not_to raise_error
   end

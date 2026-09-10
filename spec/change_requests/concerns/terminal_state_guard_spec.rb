@@ -84,9 +84,7 @@ RSpec.describe ChangeRequests::Concerns::TerminalStateGuard do
     end
   end
 
-  # §5.8: terminal-state protection applies to the request row's own lifecycle, not to appending to
-  # the audit trail. Events and attempts are separate rows, and commenting on a finished request is
-  # the point of having a trail at all (§5.5).
+  # Applies to the request row's lifecycle, not to appending events - see §5.5.
   it "says nothing about other tables, which is how a finished request still accepts comments" do
     TerminalProbe.create!(status: "successful")
 

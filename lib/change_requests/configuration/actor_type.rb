@@ -2,23 +2,16 @@
 
 module ChangeRequests
   class Configuration
-    # One host class that may act on change requests (§9.1):
-    #
     #   config.actor_type "User" do |t|
     #     t.key_type    = :uuid
     #     t.label       = ->(user) { user.full_name.presence || user.email }
-    #     t.permissions = ->(user) { user.permissions }
-    #     t.may_request = true
-    #     t.may_approve = true
-    #     t.may_execute = true
+    #     t.permissions = ->(user) { user.roles }
     #   end
     #
-    # `name` is the actor's full constant name, verbatim: "Admin" for a top-level class,
-    # "Accounts::Admin" for a namespaced one, and the subclass's own name under STI - two STI
-    # subclasses may need different labels, permissions and key casts, so neither collapses into a
-    # base class.
+    # `name` is the full constant name, verbatim - "Accounts::Admin", and the subclass's own name
+    # under STI, since two STI subclasses may need different labels, permissions and key casts.
     #
-    # `finder` and `path` arrive in M4, with `ActorRef` and batch resolution.
+    # `finder` and `path` arrive with M4.
     class ActorType < RegisteredType
       attr_accessor :permissions, :may_request, :may_approve, :may_execute
 
@@ -37,8 +30,7 @@ module ChangeRequests
 
       private
 
-      # Only approvers need a permission set: eligibility is matched against the quorum's permission
-      # rows (§5.3). A class that may request but not approve never has its permissions read.
+      # Only approvers need one: a class that may request but not approve never has it read.
       def permissions_problem
         return unless may_approve
         return if permissions.respond_to?(:call)

@@ -2,14 +2,8 @@
 
 require_relative "gem_schema"
 
-# Creates the dummy app's database if it is missing and loads its schema.
-#
-# Deliberately not a `db:test:prepare` the developer has to remember: a first `bundle exec rspec` on
-# a fresh checkout should work, and a schema change should take effect without a second command.
-# Loading is cheap - four small tables - and `force: :cascade` makes it idempotent.
-#
-# Defined in spec/support so it never ships inside the gem; the gem has no opinion about how a host
-# creates its own database.
+# Creates the database if missing and loads the schema, so a first `rspec` on a fresh checkout
+# works with no remembered command. force: :cascade makes it idempotent.
 module DummyDatabase
   module_function
 
@@ -19,8 +13,7 @@ module DummyDatabase
     ActiveRecord::Base.establish_connection(db_config)
     load_schema
 
-    # The gem's own nine tables, from the install generator's migration template rather than from a
-    # schema.rb copied out of it - so the suite exercises the artefact a host runs (M1a-2).
+    # From the install generator's template, not a schema.rb copied out of it.
     GemSchema.reset!
   end
 

@@ -1,14 +1,7 @@
 # frozen_string_literal: true
 
-# Run in a subprocess with Rails never required (§15.5).
-#
-# This is the proof behind the claim in §1: the domain core is usable from a job, a console, an API,
-# Avo, Administrate or a rake task, against a bare ActiveRecord connection, with no `Rails::Engine`
-# anywhere. If this script ever needs Rails to run, the seam has been broken and the split into
-# `change_requests` + `change_requests-rails` has stopped being a `git mv`.
-#
-# M0-7 gets it as far as "loads, connects, queries". M1a-10 extends it to migrate and create a
-# request; M1b-14 to approve one.
+# Run in a subprocess with Rails never required (§15.5). If this ever needs Rails, the seam in §1 is
+# broken. M1a-10 extends it to migrate and create a request; M1b-14 to approve one.
 
 require "active_record"
 require "change_requests"

@@ -8,14 +8,10 @@ class JsonbProbe < ChangeRequests::Record
   self.table_name = "jsonb_probes"
 end
 
-# `payload`, `payload_labels` and event `metadata` are jsonb (§5.1, §5.5), written and read whole in
-# Ruby. If jsonb stops round-tripping, most of Milestone 1 stops working - so this is checked
-# directly rather than discovered through a confusing failure three tickets later.
-#
-# It is not hypothetical. Ruby 4 ships json 3, ActiveSupport 8.1.3.1 calls `JSON.parse(json, options)`
-# with the options positionally, json 3 removed that form, and every jsonb read raises
-# `ArgumentError: wrong number of arguments (given 2, expected 1)`. The Gemfile pins json to 2.x
-# until Rails catches up; this fails if that stops being enough.
+# payload, payload_labels and event metadata are jsonb, so a broken round-trip breaks most of
+# Milestone 1. Not hypothetical: ActiveSupport 8.1.3.1 calls JSON.parse positionally, json 3 removed
+# that form, and every jsonb read raises ArgumentError. The Gemfile pins json to 2.x; this fails if
+# that stops being enough.
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "jsonb columns" do
   it "reads back an empty default" do

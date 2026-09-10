@@ -3,12 +3,8 @@
 require "rails_helper"
 
 RSpec.describe ChangeRequests::Record do
-  # §4's nine tables, as constant => table name. Listed in full from M1a-1 so that a model arriving
-  # in M1a-3 onwards cannot quietly derive the wrong name: each pair asserts itself the moment the
-  # constant exists, and reports as pending until then.
-  #
-  # This is the acceptance M1a-1 owes - "a rename cannot pass silently" - written so it does not
-  # have to wait for the models it is about.
+  # §4's tables. Each pair asserts itself once its constant exists, and is pending until then, so a
+  # model added in M1a-3 onwards cannot derive the wrong name unnoticed.
   def self.nine_tables
     {
       "Request" => "change_requests",
@@ -60,9 +56,7 @@ RSpec.describe ChangeRequests::Record do
   end
 
   describe "explicit table names" do
-    # A model whose table name differs from the one §4's convention would derive has opted out of
-    # that convention, and only Request may. Vacuous until M1a-3 defines the first model, then true
-    # of every model that exists - which is the point of deriving the list rather than writing it.
+    # Vacuous until M1a-3, then true of every model that exists.
     it "is opted out of by Request and by nothing else" do
       opted_out = loaded_models.reject { |model| model.table_name == derived_table_name_for(model) }
 

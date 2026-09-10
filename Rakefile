@@ -42,13 +42,9 @@ end
 
 RSpec::Core::RakeTask.new(:rspec)
 
-# §15.5's runtime half: the domain core loads, connects and runs with Rails never required. Its
-# static half - that no domain file references a Rails constant - is `rake archspec` below.
-#
-# Run as its own task in CI as well as inside the full suite, because running it alone is a stronger
-# claim: `RSpec::Core::RakeTask` shells out to a fresh `ruby … rspec`, so the parent process never
-# loads Rails either and nothing can pass for the wrong reason. The isolation is the separate
-# *process*, not a separate CI job - which is why CI can group it with the rest of the specs.
+# §15.5's runtime half; the static half is `rake archspec`. Kept a separate task because
+# RSpec::Core::RakeTask shells out to a fresh process, so the parent never loads Rails either. The
+# isolation is the process, not a CI job - which is why CI can group it with the other specs.
 RSpec::Core::RakeTask.new(:headless) do |task|
   task.pattern = "spec/integration/headless_spec.rb"
 end
@@ -60,36 +56,19 @@ end
 
 RuboCop::RakeTask.new
 
-# The architecture in PLAN.md §1 and §2, checked statically - see Archspec.rb for the rules. This
-# is §15.5's static half, and it checks rather more besides: layer boundaries, and every directory
-# M6 and M7 add. It parses rather than boots, so it needs no database and no dummy application.
+# §15.5's static half, plus layer boundaries. Rules in Archspec.rb. Parses; needs no database.
 desc "Check the architecture boundaries in Archspec.rb"
 task :archspec do
   sh "archspec", "check"
 end
 
-# Brakeman expects a Rails application, and this is a gem: the code lives in lib/, not app/, and
-# there is nothing at the root to recognise until M6 adds app/controllers and app/views.
-# `--force-scan` is what makes it scan anyway - without it, it refuses *and exits 0*, which is the
-# worst of both worlds.
+# --force-scan because this is a gem, not an app: without it Brakeman refuses *and exits 0*. It does
+# reach lib/, which is what matters - §6.12's dispatch constantizes a stored string and calls a
+# method on it, the shape UnsafeReflection and Send exist for.
 #
-# It does reach lib/: a planted `eval` in the domain core is reported. That is the point, because
-# §6.12's dispatch resolves a stored class name and calls a method on it, which is precisely the
-# shape UnsafeReflection and Send exist for. M2 and M3 are where that lands.
-#
-# Two things were measured rather than assumed, so they do not have to be re-litigated:
-#
-#   * `--add-engines-path .` and `--add-libs-path lib` add nothing here. They exist for engines and
-#     Ruby that live *outside* the scanned root; the gem root already is the root, and Brakeman
-#     scans app/, lib/ and config/ under it by default. Checked against a simulated M6 tree - a
-#     vulnerable controller and view under app/ - where plain `--force-scan` found all five
-#     warnings (CSRF, XSS, redirect, SQL injection, eval) and the extra flags changed nothing.
-#   * Scanning spec/dummy instead is worth less: it needs no --force-scan but reports the dummy's
-#     own four fixture models and none of the gem, which sits outside that directory. The gem root
-#     is also the target that grows into M6's controllers and views.
-#
-# Brakeman exits 3 when it finds a warning and 0 when it does not, so `sh` fails the build on its
-# own; the two --exit-on flags say so out loud rather than relying on that.
+# Measured, so it need not be re-argued: --add-engines-path and --add-libs-path change nothing (the
+# gem root already is the scanned root), and scanning spec/dummy instead sees only the dummy's own
+# fixture models. Brakeman exits 3 on a warning; the --exit-on flags make that explicit.
 desc "Scan for security warnings with Brakeman"
 task :brakeman do
   sh "brakeman", "--force-scan", "--no-progress", "--no-summary", "--quiet", "--exit-on-error", "--exit-on-warn"

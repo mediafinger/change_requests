@@ -7,9 +7,8 @@ ENV["RAILS_ENV"] ||= "test"
 require_relative "dummy/config/environment"
 require "rspec/rails"
 
-# Creating the database and loading the schema happens here rather than in a rake task the developer
-# has to remember. CI still runs `rake dummy:db:prepare` first, so a broken schema fails its own
-# step rather than as a confusing spec failure.
+# Here rather than in a rake task, so a fresh checkout needs no remembered command. CI still runs
+# `rake dummy:db:prepare` first, so a broken schema fails its own step.
 DummyDatabase.prepare!
 
 RSpec.configure do |config|

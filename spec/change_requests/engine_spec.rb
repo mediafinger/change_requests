@@ -29,9 +29,7 @@ RSpec.describe "ChangeRequests::Engine" do
     RUBY
   end
 
-  # A Rails application small enough to build in a heredoc, and real enough to run the engine's
-  # initializers. M0-6's dummy app replaces this for everything else; here it is the only way to
-  # prove `config.after_initialize` is wired at all.
+  # Small enough for a heredoc, real enough to run the engine's initializers.
   def self.booting(configure)
     <<~RUBY
       require "rails"
@@ -83,10 +81,7 @@ RSpec.describe "ChangeRequests::Engine" do
       expect(probe).to include("railtie_namespace=ChangeRequests::Engine")
     end
 
-    # The regression M0-2 exists to prevent: `isolate_namespace` installs its own
-    # `table_name_prefix` unless the module already responds to one, and its version yields
-    # `change_requests_stages` rather than §4's `change_request_stages`. Deleting the definition from
-    # the entrypoint really does flip this to "change_requests_".
+    # Deleting ChangeRequests.table_name_prefix really does flip this to "change_requests_".
     it "does not let isolate_namespace overwrite the table name prefix" do
       expect(probe).to include("table_name_prefix=change_request_")
     end

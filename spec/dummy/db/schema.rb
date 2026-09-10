@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
-# The host application's own tables. The gem's nine tables are not here - they arrive with M1a, from
-# the install generator's migration template, which is the artefact a real host would run.
-#
-# Three primary key types in one schema is the whole point (§15.1): it is what makes the polymorphic
-# string `*_id` columns in §5.7 testable rather than merely asserted.
+# Host tables only. The gem's nine come from the install generator's template - see GemSchema.
+# Three primary key types in one schema is the point.
 ActiveRecord::Schema[8.1].define(version: 0) do
   enable_extension "pgcrypto"
 

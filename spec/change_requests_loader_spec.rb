@@ -56,10 +56,8 @@ RSpec.describe ChangeRequests do
       expect(described_class.table_name_prefix).to eq("change_request_")
     end
 
-    # `isolate_namespace` defines its own `table_name_prefix` - which would yield
-    # `change_requests_stages` - only `unless mod.respond_to?(:table_name_prefix)`. Responding to it
-    # here, from the file loaded before engine.rb, is what keeps ours. M0-5 asserts the same against
-    # a real engine.
+    # isolate_namespace installs its own only `unless mod.respond_to?(:table_name_prefix)`.
+    # M0-5 asserts the same against a real engine.
     it "is defined before any engine can install its own" do
       expect(described_class).to respond_to(:table_name_prefix)
     end

@@ -2,10 +2,8 @@
 
 require "rails_helper"
 
-# The schema is the expensive thing to get wrong: after the first adopter, every change to it is a
-# migration in someone else's repository. So it is asserted against the database itself - `pg_index`,
-# `pg_constraint`, `information_schema` - rather than against the migration file that created it,
-# which would only prove the file says what it says.
+# Asserted against pg_index and pg_constraint, not the migration file, which would only prove the
+# file says what it says. After the first adopter every schema change is a migration in their repo.
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "the generated schema" do
   def self.nine_tables

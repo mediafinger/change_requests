@@ -3,16 +3,12 @@
 require "erb"
 require "tmpdir"
 
-# Runs the install generator's migration template against the dummy database.
+# Renders the install generator's migration template into a tmpdir and runs it through
+# MigrationContext - the same path as `rails db:migrate` - so the suite exercises the artefact a
+# host runs.
 #
-# The template is the artefact a host actually runs, so the suite runs *it* rather than a schema.rb
-# copied from it. M7 writes the generator that copies it into a host's `db/migrate`; until then this
-# renders it into a throwaway directory and drives it through the ordinary `MigrationContext`, which
-# is the same code path `rails db:migrate` uses (risk **R2**).
-#
-# `reset!` migrates down and back up on every run, deliberately. A recorded schema_migrations row
-# would otherwise mean an edited template silently did not take effect - the one failure mode that
-# would waste an afternoon.
+# reset! migrates down and back up every run: a recorded schema_migrations row would otherwise mean
+# an edited template silently did not take effect.
 module GemSchema
   TEMPLATE = "lib/generators/change_requests/install/templates/migration.rb.tt"
   VERSION = "20260101000000"
@@ -27,7 +23,6 @@ module GemSchema
 
   def migrate! = context.migrate
 
-  # To zero: every table this migration created, and the schema_migrations row that remembers it.
   def rollback! = context.migrate(0)
 
   def context = ActiveRecord::MigrationContext.new(migration_path)
@@ -40,8 +35,7 @@ module GemSchema
     ActiveRecord::Base.connection.table_exists?(FIRST_TABLE)
   end
 
-  # Rendered once per process into a temporary directory, named the way a generated migration is so
-  # `MigrationContext` recognises it.
+  # Filename must look like a generated migration for MigrationContext to see it.
   def migration_path
     @migration_path ||= Dir.mktmpdir("change_requests_migration").tap do |dir|
       File.write(File.join(dir, "#{VERSION}_create_change_requests.rb"), rendered)

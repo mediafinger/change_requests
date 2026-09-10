@@ -1,16 +1,12 @@
 # frozen_string_literal: true
 
-# §15.4. `spec.files` is built by rejecting paths from `git ls-files`, which means a new directory
-# ships by default and a *renamed* one silently stops shipping. The failure mode is a released gem
-# that raises on `rails g change_requests:install` because a template is missing - discovered by an
-# adopter, not by CI.
+# spec.files rejects paths from `git ls-files`, so a renamed directory silently stops shipping and
+# an adopter finds out when the install generator cannot find a template.
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "the packaged gem" do
   subject(:packaged) { Gem::Specification.load("change_requests.gemspec").files }
 
-  # Directories the engine and the generators need at runtime. Listed whether or not they exist yet,
-  # so that M6 and M7 cannot add one and forget to check it ships: the assertion turns itself on the
-  # moment the directory appears in the repository.
+  # Listed before they exist: each turns itself on when M6 or M7 adds the directory.
   def self.required_at_runtime
     %w(
       app/controllers
@@ -61,9 +57,7 @@ RSpec.describe "the packaged gem" do
     end
   end
 
-  # §15.4's second assertion. Vacuous until M7 writes the generators, and meaningful the moment it
-  # does - a template that exists on disk but is missing from `spec.files` is the exact bug this
-  # spec is here to catch.
+  # Vacuous until M7 writes the generators.
   describe "generator templates" do
     it "packages every template a generator will copy" do
       templates = Dir["lib/generators/**/templates/**/*"].select { |path| File.file?(path) }

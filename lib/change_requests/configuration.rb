@@ -1,11 +1,8 @@
 # frozen_string_literal: true
 
 module ChangeRequests
-  # `ChangeRequests.config` always returns a memoised instance, never nil; `configure` mutates it in
-  # place, so declarations may be split across several initializers (§10).
-  #
-  # Only the settings Milestone 1 reads are here. Execution, notification and UI keys arrive with
-  # the milestones that read them - a setting nothing consults yet is a promise the gem cannot keep.
+  # Only the settings Milestone 1 reads. Execution, notification and UI keys arrive with the
+  # milestones that consult them.
   class Configuration
     LABEL_STRATEGIES    = %i(live snapshot).freeze
     PERMISSION_MATCHES  = %i(any all).freeze
@@ -17,8 +14,7 @@ module ChangeRequests
     # Authorization (§9.2)
     attr_accessor :authorization, :default_permission_match
 
-    # Separation of duties (§8, §8.1).
-    #
+    # Separation of duties (§8, §8.1)
     attr_accessor :approver_may_execute, :requester_may_execute, :requester_may_override
 
     # Workflow and execution defaults (§7.1, §8)
@@ -43,8 +39,8 @@ module ChangeRequests
       @default_expires_in     = nil
     end
 
-    # Registers an actor class, or reopens one already registered so that settings accumulate rather
-    # than replace - two initializers may each contribute part of the same registration.
+    # Reopens an existing registration rather than replacing it: two initializers may each
+    # contribute part of one.
     def actor_type(name)
       register(@actor_types, ActorType, name) { |type| yield(type) if block_given? }
     end
@@ -53,8 +49,7 @@ module ChangeRequests
       register(@tenant_types, TenantType, name) { |type| yield(type) if block_given? }
     end
 
-    # Runs in the engine's `after_initialize` (§10). Reports every problem at once, so one boot
-    # fixes one round of mistakes rather than one mistake per boot.
+    # Runs in the engine's after_initialize. Reports every problem at once, not one per boot.
     def validate!
       problems = self.problems
 
