@@ -45,8 +45,10 @@ RSpec::Core::RakeTask.new(:rspec)
 # §15.5's runtime half: the domain core loads, connects and runs with Rails never required. Its
 # static half - that no domain file references a Rails constant - is `rake archspec` below.
 #
-# Run on its own in CI as well as inside the full suite, because running it alone is a stronger
-# claim: the parent process never loads Rails either, so nothing can pass for the wrong reason.
+# Run as its own task in CI as well as inside the full suite, because running it alone is a stronger
+# claim: `RSpec::Core::RakeTask` shells out to a fresh `ruby … rspec`, so the parent process never
+# loads Rails either and nothing can pass for the wrong reason. The isolation is the separate
+# *process*, not a separate CI job - which is why CI can group it with the rest of the specs.
 RSpec::Core::RakeTask.new(:headless) do |task|
   task.pattern = "spec/integration/headless_spec.rb"
 end
@@ -90,7 +92,7 @@ end
 # own; the two --exit-on flags say so out loud rather than relying on that.
 desc "Scan for security warnings with Brakeman"
 task :brakeman do
-  sh "brakeman", "--force-scan", "--no-progress", "--quiet", "--exit-on-error", "--exit-on-warn", "."
+  sh "brakeman", "--force-scan", "--no-progress", "--no-summary", "--quiet", "--exit-on-error", "--exit-on-warn"
 end
 
 desc "Open a console with ChangeRequests loaded"
