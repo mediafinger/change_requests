@@ -193,11 +193,17 @@ where no engine exists at all. Every model in §4 then derives its table name by
 single exception: it would derive `change_request_requests`, so it carries an explicit
 `self.table_name = "change_requests"`.
 
-**Runtime dependencies:** `activerecord >= 8.1`, `activesupport >= 8.1`, `zeitwerk >= 2.6`. `railties` is
-a *development* dependency plus an optional runtime one - declare it runtime only if the engine is the primary
-delivery (it is), but keep every `require "rails/..."` behind `defined?(Rails::Engine)`. No `pg` runtime
-dependency: PostgreSQL-only is a documented requirement, not a gem constraint on the host's adapter gem
-version.
+**Runtime dependencies:** `activerecord >= 8.1`, `activesupport >= 8.1`, `zeitwerk >= 2.6`,
+`json ~> 2.7`. `railties` is a *development* dependency plus an optional runtime one - declare it runtime
+only if the engine is the primary delivery (it is), but keep every `require "rails/..."` behind
+`defined?(Rails::Engine)`. No `pg` runtime dependency: PostgreSQL-only is a documented requirement, not a
+gem constraint on the host's adapter gem version.
+
+**`json` is pinned, and it is a runtime pin on purpose.** Ruby 4 ships json 3, which removed
+`JSON.parse(source, options)`; ActiveSupport 8.1 still calls it that way, so every `jsonb` column - `payload`,
+`payload_labels`, event `metadata` - raises `ArgumentError` on read. A development pin would protect this
+gem's own suite and leave every adopter broken. Drop the constraint when a Rails release calls `JSON.parse`
+with keywords.
 
 ## 3. Naming
 
@@ -2310,6 +2316,15 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
 17. **`config.requester_may_override` is an ordinary setting defaulting to `false`.** An override is
     already reasoned, separately permissioned and audited as an exception, so a host that genuinely needs
     the requester to be able to take it may say so (§8.1).
+18. **`json` is a runtime dependency pinned to `~> 2.7`** (§2). json 3 removed the positional-options form
+    of `JSON.parse` that ActiveSupport 8.1 still uses, and every `jsonb` column breaks on read without the
+    pin. A runtime constraint rather than a development one, because a development pin protects this gem's
+    suite and leaves adopters broken.
+19. **Model behaviour never depends on host framework configuration.** `ChangeRequests::Record` sets
+    `belongs_to_required_by_default` itself: `belongs_to` reads that flag when the association is
+    *declared*, and the gem's models load before Rails configures anything, so every `belongs_to` was
+    silently optional until the base class set it. Any other setting read at declaration time gets the same
+    treatment.
 
 ## 20. Appendix: salvage from the existing implementations
 
