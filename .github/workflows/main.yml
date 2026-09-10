@@ -22,8 +22,28 @@ jobs:
         gemfile:
           - gemfiles/rails_8.1.gemfile
 
+    # PostgreSQL only, deliberately: no sqlite fallback and no second adapter to keep working
+    # (PLAN.md 18). The dummy app in spec/dummy runs against this.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: change_requests_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     env:
       BUNDLE_GEMFILE: ${{ matrix.gemfile }}
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
 
     steps:
       - uses: actions/checkout@v6
@@ -34,5 +54,7 @@ jobs:
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
+      - name: Prepare the dummy application's database
+        run: bundle exec rake dummy:db:prepare
       - name: Run the default task
         run: bundle exec rake

@@ -1,0 +1,21 @@
+# PostgreSQL only, deliberately (PLAN.md §5.7, §18). There is no sqlite fallback and no second
+# adapter to keep working.
+#
+# DATABASE_URL wins when it is set, which is how CI points the suite at its service container. Local
+# runs fall back to a database owned by the current Unix user, which is what a stock Homebrew or
+# Postgres.app installation gives you.
+default: &default
+  adapter: postgresql
+  encoding: unicode
+  pool: <%= ENV.fetch("RAILS_MAX_THREADS", 5) %>
+  host: <%= ENV.fetch("PGHOST", "localhost") %>
+  username: <%= ENV.fetch("PGUSER", ENV.fetch("USER", "postgres")) %>
+  password: <%= ENV.fetch("PGPASSWORD", nil) %>
+
+test:
+  <<: *default
+  database: <%= ENV.fetch("CHANGE_REQUESTS_TEST_DATABASE", "change_requests_test") %>
+
+development:
+  <<: *default
+  database: change_requests_development
