@@ -10,11 +10,14 @@ module ChangeRequests
   # No token column: the request id is the idempotency key handed to the target, and needs no storage
   # (§19.13).
   class Attempt < Record
+    include Concerns::ActorColumns
     include Concerns::StringEnum
 
     OUTCOMES = %w(succeeded failed abandoned).freeze
 
     belongs_to :change_request, class_name: "ChangeRequests::Request", inverse_of: :attempts
+
+    actor_reference :executer, optional: true
 
     validates :number, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
 

@@ -9,15 +9,15 @@ module ChangeRequests
   # Write-once: materialised from the frozen workflow when the request is created, so editing an
   # operation's permission list never changes who may approve a request already in flight.
   class QuorumPermission < Record
+    include Concerns::ActorColumns
     include Concerns::Immutable
 
     belongs_to :quorum, class_name: "ChangeRequests::Quorum",
                         foreign_key: :change_request_quorum_id,
                         inverse_of: :permissions
 
-    # M1a-9 moves this to Concerns::ActorColumns, which every actor reference shares.
-    validates :actor_type, inclusion: { in: ->(_) { ChangeRequests.config.actor_types.keys } },
-                           allow_nil: true
+    # Type and nothing else: NULL means "any registered class".
+    actor_type_reference :actor
 
     validate :constrains_something
 

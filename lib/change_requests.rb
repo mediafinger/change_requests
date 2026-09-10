@@ -23,6 +23,22 @@ module ChangeRequests
 
     def config = @config ||= Configuration.new
 
+    # The (type, id, label) triple for a host record, with the label snapshotted through the
+    # registered lambda. Raises before anything is constantized: the registry is the allowlist, and
+    # `actor.class.name` is only ever compared against it (§5.7).
+    def actor_attributes(actor, registry: :actor_types)
+      type = actor.class.name
+      registered = config.public_send(registry)[type]
+
+      if registered.nil?
+        fail UnknownActorType,
+             "#{type} is not a registered #{registry.to_s.singularize.humanize.downcase}. " \
+             "Register it with `config.#{registry.to_s.singularize} \"#{type}\"`."
+      end
+
+      { type: type, id: actor.id.to_s, label: registered.label.call(actor).to_s }
+    end
+
     def configure
       yield(config)
 

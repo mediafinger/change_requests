@@ -5,6 +5,7 @@ module ChangeRequests
   #
   # The only model that names its own table - the convention would derive `change_request_requests`.
   class Request < Record
+    include Concerns::ActorColumns
     include Concerns::StringEnum
     include Concerns::ReadonlyAttributes
     include Concerns::TerminalStateGuard
@@ -36,8 +37,11 @@ module ChangeRequests
     has_many :attempts, -> { order(:number) },
              class_name: "ChangeRequests::Attempt", inverse_of: :change_request
 
+    actor_reference :requester
+    actor_reference :executer, optional: true
+    actor_reference :tenant, optional: true, registry: :tenant_types
+
     validates :operation_key, :operation_version, :service, :method_name, presence: true
-    validates :requester_type, :requester_id, :requester_label, presence: true
     validates :current_stage_position, :max_attempts,
               numericality: { only_integer: true, greater_than_or_equal_to: 1 }
 
