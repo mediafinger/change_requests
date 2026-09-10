@@ -23,6 +23,10 @@ module ChangeRequests
 
     def config = @config ||= Configuration.new
 
+    # The declaration registry (§6.12). Memoised for the same reason as config: initializers
+    # accumulate into it.
+    def operations = @operations ||= Operations.new
+
     # The (type, id, label) triple for a host record, with the label snapshotted through the
     # registered lambda. Raises before anything is constantized: the registry is the allowlist, and
     # `actor.class.name` is only ever compared against it (§5.7).

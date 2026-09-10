@@ -207,4 +207,45 @@ RSpec.describe ChangeRequests::Configuration do
       }
     end
   end
+
+  # What spec/support/global_state.rb relies on to give every example its own configuration.
+  describe "#dup" do
+    before { register_valid_actor_type(config) }
+
+    it "copies the settings" do
+      copy = config.dup
+      copy.default_permission_match = :all
+
+      expect(config.default_permission_match).to eq(:any)
+    end
+
+    it "copies the registries, so registering on the copy leaves the original alone" do
+      copy = config.dup
+      copy.actor_type("Admin") { |type| type.label = ->(admin) { admin.name } }
+      copy.tenant_type("Organization") { |type| type.label = ->(org) { org.name } }
+
+      expect(config.actor_types.keys).to eq(["User"])
+      expect(config.tenant_types).to be_empty
+    end
+
+    # `actor_type` reopens an existing registration rather than replacing it, so copying the hash
+    # is not enough - the registered objects have to be copied too.
+    it "copies the registered types, so reopening one on the copy leaves the original alone" do
+      copy = config.dup
+      copy.actor_type("User") do |type|
+        type.key_type    = :uuid
+        type.may_approve = false
+      end
+
+      expect(config.actor_types.fetch("User").key_type).to eq(:integer)
+      expect(config.actor_types.fetch("User").may_approve).to be(true)
+    end
+
+    it "copies the authorization strategy" do
+      copy = config.dup
+
+      expect(copy.authorization).to be_a(ChangeRequests::Authorization::Permissions)
+      expect(copy.authorization).not_to equal(config.authorization)
+    end
+  end
 end

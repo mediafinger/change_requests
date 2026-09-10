@@ -73,6 +73,16 @@ RSpec.describe ChangeRequests do
     end
   end
 
+  describe ".operations" do
+    it "is never nil, even before an operation is declared" do
+      expect(described_class.operations).to be_a(ChangeRequests::Operations)
+    end
+
+    it "is memoised, so declarations accumulate across initializers" do
+      expect(described_class.operations).to equal(described_class.operations)
+    end
+  end
+
   describe ".configure" do
     it "yields the memoised config and returns it" do
       yielded = nil
