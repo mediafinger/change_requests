@@ -45,6 +45,10 @@ RSpec.describe ChangeRequests do
     it "does not expect version.rb to define a Version constant" do
       expect(cpath_at("lib/change_requests/version.rb")).to be_nil
     end
+
+    it "does not expect errors.rb to define an Errors namespace" do
+      expect(cpath_at("lib/change_requests/errors.rb")).to be_nil
+    end
   end
 
   describe ".table_name_prefix" do
