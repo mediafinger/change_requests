@@ -24,6 +24,22 @@ namespace :bundle do
   task audit: "audit:check"
 end
 
+namespace :dummy do
+  namespace :db do
+    desc "Create the dummy application's test database and load its schema"
+    task :prepare do
+      ENV["RAILS_ENV"] ||= "test"
+
+      require_relative "spec/dummy/config/environment"
+      require_relative "spec/support/dummy_database"
+
+      DummyDatabase.prepare!
+
+      puts "Prepared #{DummyDatabase.db_config.database}"
+    end
+  end
+end
+
 RSpec::Core::RakeTask.new(:rspec)
 
 RuboCop::RakeTask.new
