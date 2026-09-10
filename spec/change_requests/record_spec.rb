@@ -31,6 +31,26 @@ RSpec.describe ChangeRequests::Record do
     end
   end
 
+  # `belongs_to` reads belongs_to_required_by_default when the association is *declared*, and these
+  # models are eager-loaded before Rails sets it on ActiveRecord::Base. Without it set on Record,
+  # every belongs_to in the gem is silently optional and a stage with no request passes validation.
+  describe "required belongs_to" do
+    it "is set on the base class, which loads before any model declares an association" do
+      expect(described_class.belongs_to_required_by_default).to be(true)
+    end
+
+    it "makes a child invalid without its parent" do
+      expect(ChangeRequests::Stage.new(position: 1, name: "operational")).not_to be_valid
+    end
+
+    it "reports the missing parent rather than some other column" do
+      stage = ChangeRequests::Stage.new(position: 1, name: "operational")
+      stage.valid?
+
+      expect(stage.errors[:change_request]).to be_present
+    end
+  end
+
   describe "derived table names" do
     nine_tables.each do |constant, table_name|
       it "gives #{constant} the table #{table_name}" do
