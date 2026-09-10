@@ -1,0 +1,18 @@
+# frozen_string_literal: true
+
+# CI matrix entry. Run with:
+#
+#   BUNDLE_GEMFILE=gemfiles/rails_8.1.gemfile bundle install
+#   BUNDLE_GEMFILE=gemfiles/rails_8.1.gemfile bundle exec rake ci
+#
+# The root Gemfile resolves whatever the gemspec allows; this one pins the Rails minor that the matrix
+# tests. Add a sibling file per supported Rails version - see .github/workflows/main.yml.
+
+source "https://rubygems.org"
+
+gem "activejob",     "~> 8.1.0"
+gem "activerecord",  "~> 8.1.0"
+gem "activesupport", "~> 8.1.0"
+gem "railties",      "~> 8.1.0"
+
+gemspec path: ".."
