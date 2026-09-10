@@ -46,10 +46,12 @@ Gem::Specification.new do |spec|
   #
   spec.add_dependency "activerecord",  ">= 8.1"
   spec.add_dependency "activesupport", ">= 8.1"
+  spec.add_dependency "json",          "~> 2.7" # beware: json 3.0 is a breaking change
   spec.add_dependency "railties",      ">= 8.1"
   spec.add_dependency "zeitwerk",      ">= 2.6"
 
   # general development and test dependencies
+  #
   spec.add_development_dependency "amazing_print",                  ">= 1.8"
   spec.add_development_dependency "archspec",                       ">= 1.1"
   spec.add_development_dependency "brakeman",                       ">= 7.0"
@@ -62,7 +64,8 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "rubocop-rake",                   "~> 0.7"
   spec.add_development_dependency "rubocop-rspec",                  "~> 3.10"
 
-  # the dummy app and the specs that run against it - PostgreSQL only, deliberately no sqlite3
+  # the dummy app and the specs that run against it
+  #
   spec.add_development_dependency "activejob",                      ">= 8.1"
   spec.add_development_dependency "database_cleaner-active_record", ">= 2.2"
   spec.add_development_dependency "pg",                             ">= 1.5"

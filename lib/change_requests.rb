@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# The domain core is ActiveRecord and ActiveSupport, and nothing else (§2). Requiring it here rather
+# than leaving it to the host is what lets `loader.eager_load` succeed in a process that never went
+# near Rails - activerecord is a standalone gem, and pulls in activesupport but no railtie.
+require "active_record"
 require "zeitwerk"
 
 require_relative "change_requests/version"
