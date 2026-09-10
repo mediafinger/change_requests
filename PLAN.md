@@ -83,7 +83,7 @@ headless CI job (§15.5) mean it would be a `git mv` and a gemspec.
 change_requests/
 ├── change_requests.gemspec
 ├── Gemfile
-├── gemfiles/                                  # CI matrix (rails_7.1.gemfile … rails_8.1.gemfile)
+├── gemfiles/                                  # CI matrix (rails_8.1.gemfile)
 ├── Rakefile                                   # rake ci => rubocop + rspec + bundle:audit
 ├── README.md  CHANGELOG.md  LICENSE.txt  CODE_OF_CONDUCT.md
 ├── docs/
@@ -193,7 +193,7 @@ where no engine exists at all. Every model in §4 then derives its table name by
 single exception: it would derive `change_request_requests`, so it carries an explicit
 `self.table_name = "change_requests"`.
 
-**Runtime dependencies:** `activerecord >= 7.1`, `activesupport >= 7.1`, `zeitwerk >= 2.6`. `railties` is
+**Runtime dependencies:** `activerecord >= 8.1`, `activesupport >= 8.1`, `zeitwerk >= 2.6`. `railties` is
 a *development* dependency plus an optional runtime one - declare it runtime only if the engine is the primary
 delivery (it is), but keep every `require "rails/..."` behind `defined?(Rails::Engine)`. No `pg` runtime
 dependency: PostgreSQL-only is a documented requirement, not a gem constraint on the host's adapter gem
@@ -2233,7 +2233,7 @@ sections. These six are not, and each needs a decision rather than more prose:
 ## 18. Cut line for 1.0
 
 **In:** operations, staged schema, events, `rejected`, execution safety, presenters, ERB UI with the six-tier
-override story, generators, host test kit, PostgreSQL-only, Rails 7.1–8.1.
+override story, generators, host test kit, PostgreSQL-only, Rails 8.1.
 
 **On other databases:** nothing ships and nothing is prepared - no adapter branches, no compatibility
 layer, no second CI target. The only concession is the schema posture in §5.7, which costs nothing today and
