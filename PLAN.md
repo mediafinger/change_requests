@@ -251,7 +251,6 @@ stage. This avoids a painful schema migration later, and costs one extra table n
 | `tenant_label`              | string, null                          | snapshot at creation                                           |
 | `payload_labels`            | jsonb, not null, default `{}`         | snapshot of human labels for the records the payload refers to |
 | `current_stage_position`    | integer, not null, default 1          | stages are always sequential - see §5.2                        |
-| `idempotency_key`           | string, null, **unique**              | supplied or derived; dedupes creation                          |
 | `attempts_count`            | integer, not null, default 0          |                                                                |
 | `max_attempts`              | integer, not null, default 1          | snapshot from the operation                                    |
 | `expires_at`                | datetime, null                        |                                                                |
@@ -261,7 +260,7 @@ stage. This avoids a painful schema migration later, and costs one extra table n
 | `created_at` / `updated_at` | datetime, not null                    |                                                                |
 
 Indexes: `(status)`, `(tenant_type, tenant_id, status, created_at DESC)`, `(requester_type, requester_id)`,
-`(executer_type, executer_id)`, `(operation_key)`, unique `(idempotency_key)` where not null, `(expires_at)`
+`(executer_type, executer_id)`, `(operation_key)`, `(expires_at)`
 where `status IN ('pending','approved')` (partial index for the expiry sweeper), and `(overridden_at)`
 where not null - overrides are the rows a compliance review asks for first.
 
@@ -601,8 +600,8 @@ to unwind after data exists:
   `metadata` are written and read whole, in Ruby. No `@>`, no `->>`, no GIN index is load-bearing. A jsonb
   operator may be used as an *optimisation* behind a method, never as the only implementation of a
   behaviour.
-- **Partial indexes are optimisations, not semantics.** Correctness never depends on one. The unique
-  `idempotency_key` is the only case where it is close, and the plain unique index is the fallback.
+- **Partial indexes are optimisations, not semantics.** Correctness never depends on one; every partial
+  index in §5.1 could be a plain index at some cost in size.
 
 Everything else stays unapologetically PostgreSQL: `jsonb` (not `json`), partial indexes, `FOR UPDATE`.
 Note that §9's atomic claim is a conditional `UPDATE … WHERE status = …` with a zero-rows check rather than
@@ -834,8 +833,7 @@ def update_roles
     "members.update_roles",
     payload:   { member_id: params[:id], roles: params[:roles] },
     requester: current_user,
-    tenant:    current_organization,                       # optional
-    idempotency_key: "roles:#{params[:id]}:#{Digest::SHA256.hexdigest(params[:roles].to_s)}"
+    tenant:    current_organization                        # optional
   )
 
   redirect_to change_requests_path, notice: "Submitted for approval"
@@ -843,8 +841,6 @@ rescue ChangeRequests::InvalidPayload => e
   redirect_back fallback_location: root_path, alert: e.message
 end
 ```
-
-Nothing has run. The member's roles are unchanged.
 
 **The call is identical no matter how elaborate the workflow is** - you never pass thresholds, permissions
 or stages. Those live in the operation, are resolved at creation, and are frozen onto the request.
@@ -1118,8 +1114,9 @@ it is worth saying what it buys:
 **The service contract, documented explicitly** (neither source documented it, and both broke on it):
 
 > A change-request target is a **public singleton method** that accepts **keyword arguments only** and whose
-> effect is either transactional or idempotent. It receives `idempotency_key:` if it declares that keyword -
-> the request id, stable across retries - so external calls can be deduplicated.
+> effect is either transactional or idempotent. It receives `change_request_id:` if it declares that
+> keyword - stable across every attempt - which a target calling an external API can pass on as that API's
+> idempotency key.
 
 **The payload is untyped.** It is stored as `jsonb` and dispatched as `**payload.symbolize_keys`, so the
 host's declared keys become keyword arguments. The gem validates only that it is a JSON object; matching it
@@ -1314,7 +1311,7 @@ T1  with_lock:  Guards::Execute.check!(override:)
                 emit(:execution_started)
                 COMMIT  ← the claim is now visible to every other process
 
-T2  no lock:    Dispatcher.call(operation_key:, payload:, idempotency_key: request.id)
+T2  no lock:    Dispatcher.call(operation_key:, payload:, change_request_id: request.id)
                 ← may take seconds, may call an external API, holds no row lock
 
 T3  with_lock:  success → executed_at, executer_id, status=successful, attempt.outcome=succeeded, emit(:executed)
@@ -1333,8 +1330,9 @@ Additional guarantees:
 
 - **Retry ceiling.** `retryable?` is `failed? && operation.idempotent? && attempts_count < max_attempts`.
   A non-idempotent operation is never retryable.
-- **Idempotency key.** Targets that declare an `idempotency_key:` keyword receive `request.id`, stable
-  across every attempt, so a provider that saw a timed-out first call recognises the retry instead of
+- **Stable identity for the target.** Targets that declare a `change_request_id:` keyword receive
+  `request.id`, unchanged across every attempt, so one calling an external API can hand it over as that
+  API's idempotency key and a provider that saw a timed-out first call recognises the retry instead of
   charging twice. A per-attempt token would defeat exactly that.
 - **Stuck-execution reaper.** `ChangeRequests::Maintenance.reap_stuck_executions!(older_than: 1.hour)`
   moves `executing` rows whose attempt never finished to `failed` with `outcome: abandoned` and a `reaped`
@@ -1936,13 +1934,13 @@ That shared example asserts: the service constant resolves; the action is a publ
 declared permissions are Strings that at least one registered actor type's `permissions` lambda can
 actually produce; `idempotent`/`max_attempts` are coherent (a
 non-idempotent action may not declare `max_attempts > 1`); and, if the action declares
-`idempotency_key:`, that the method accepts it.
+`change_request_id:`, that the method accepts it.
 
 Also shipped:
 
 - `"a guarded change request command"` - for hosts writing custom commands
 - `"a change requests index view"`, `"a change requests row partial"` - the view contract (§13)
-- `"an idempotent change request target"` - runs the target twice with the same `idempotency_key` and
+- `"an idempotent change request target"` - runs the target twice with the same `change_request_id` and
   asserts a single effect; hosts include it in their own service specs
 - `"a registered actor type"` - asserts the class resolves, `key_type` matches its actual primary key,
   `label` returns a non-blank String for a persisted instance, `permissions` returns an Array of Strings,
@@ -1972,7 +1970,7 @@ A real Rails app on PostgreSQL, with:
 - A spec that hard-deletes an `Admin` and asserts every historical request still renders, still exports to
   JSON, and still executes
 - Three demo targets: `Demo::UpdateRoles` (transactional, idempotent), `Demo::ChargeCard` (external,
-  non-idempotent, honours `idempotency_key:`), `Demo::Explode` (always raises)
+  non-idempotent, honours `change_request_id:`), `Demo::Explode` (always raises)
 - Seeds covering every status and a two-stage workflow
 
 `bin/demo` boots it on `localhost:3000` with seeds. This is the view-development harness and the source of
@@ -2003,7 +2001,7 @@ Required areas:
   three dummy actor classes; the CHECK rejecting a doubly-NULL row; named approvers OR-ed in) - and a spec
   asserting `Guards::Approve` and `Request.awaiting_approval_from` agree on every cell, since that
   agreement is the whole reason eligibility is rows
-- execution (success, target raises, retry ceiling, non-idempotent refusal, token propagation, reaper)
+- execution (success, target raises, retry ceiling, non-idempotent refusal, `change_request_id` propagation, reaper)
 - override (refused when the action declares none; refused for the requester; refused without a reason when
   required; `overridden_at` set; the `overridden` event's shortfall snapshot matching the state *at claim
   time* and not being rewritten by a later approval)
@@ -2091,7 +2089,7 @@ Plus a static check that no file under the domain directories mentions `ActionCo
 **Execution**
 
 - Claim-then-invoke: conditional UPDATE committed before the side effect, no row lock held across I/O
-- `executing` status, attempts table, idempotency tokens, retry ceiling
+- `executing` status, attempts table, retry ceiling, stable `change_request_id` handed to the target
 - Background execution via ActiveJob (optional dependency)
 - Stuck-execution reaper, expiry sweeper
 - Override with reason, `overridden_at`, and an `overridden` event carrying the shortfall at claim time
@@ -2127,7 +2125,7 @@ Estimates assume one experienced developer working from this plan.
 | **M1a** |           | Migrations for all nine tables, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability                                                 | §4, §5      | 3–4 d  |
 | **M1b** | 0.2.0     | Guards and commands per the §7.2 table; `with_lock`; single-stage single-quorum evaluation; error taxonomy                                                                   | §7          | 3–4 d  |
 | **M2**  | 0.3.0     | Operations: allowlist, workflow DSL, `op.version`, `op.cooldown`, materialise-on-create, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`                 | §6.4, §6.12 | 3–4 d  |
-| **M3a** |           | Claim-then-invoke: `executing`, attempts table, conditional UPDATE, idempotency key, retry ceiling. **Concurrency specs.**                                                   | §8, §15.3   | 3 d    |
+| **M3a** |           | Claim-then-invoke: `executing`, attempts table, conditional UPDATE, retry ceiling. **Concurrency specs.**                                                                    | §8, §15.3   | 3 d    |
 | **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                           | §8, §5.11   | 2 d    |
 | **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor` | §9          | 2–3 d  |
 | **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                               | §11         | 3 d    |
