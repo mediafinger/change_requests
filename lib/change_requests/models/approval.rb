@@ -9,6 +9,7 @@ module ChangeRequests
   # Not immutable. Unapprove deletes the row and its quorum links while the stage is still open
   # (§7.1), and the database cascades the links.
   class Approval < Record
+    include Concerns::ActorColumns
     include Concerns::StringEnum
 
     DECISIONS = %w(approved rejected).freeze
@@ -25,12 +26,9 @@ module ChangeRequests
                                 inverse_of: :approval
     has_many :quorums, through: :approval_quorums, source: :quorum
 
-    validates :approver_id, :approver_label, presence: true
-    validates :decided_at, presence: true
+    actor_reference :approver
 
-    # M1a-9 moves the actor triple to Concerns::ActorColumns.
-    validates :approver_type, presence: true,
-                              inclusion: { in: ->(_) { ChangeRequests.config.actor_types.keys } }
+    validates :decided_at, presence: true
 
     validate :change_request_matches_stage
 

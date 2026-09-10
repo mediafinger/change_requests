@@ -6,6 +6,7 @@ module ChangeRequests
   # Self-contained by design - `operation_version` is stamped here rather than joined from the
   # request, so the table can be exported alone as a complete log.
   class Event < Record
+    include Concerns::ActorColumns
     include Concerns::StringEnum
     include Concerns::Immutable
 
@@ -22,14 +23,14 @@ module ChangeRequests
 
     belongs_to :change_request, class_name: "ChangeRequests::Request", inverse_of: :events
 
+    # The one reference that admits the sentinel: expiry, the reaper and undeclared-operation
+    # cancellation have no actor.
+    actor_reference :actor, allow_system: true
+
     validates :operation_version, :occurred_at, presence: true
-    validates :actor_id, :actor_label, presence: true
 
-    # M1a-9 moves the actor triple to Concerns::ActorColumns.
-    validates :actor_type, presence: true, inclusion: { in: ->(_) { permitted_actor_types } }
-
-    # What Commands::Base#emit writes for a gem-originated event. M1a-9 generalises the mapping for
-    # every actor reference; this is the one the audit trail needs first.
+    # What Commands::Base#emit writes for a gem-originated event. Only this reference admits the
+    # sentinel, so the mapping stays here rather than in Concerns::ActorColumns.
     SYSTEM_ATTRIBUTES = {
       actor_type: SYSTEM_ACTOR[:type],
       actor_id: SYSTEM_ACTOR[:id],
@@ -37,10 +38,6 @@ module ChangeRequests
     }.freeze
 
     scope :by_system, -> { where(actor_type: SYSTEM_ACTOR[:type]) }
-
-    def self.permitted_actor_types
-      ChangeRequests.config.actor_types.keys + [SYSTEM_ACTOR[:type]]
-    end
 
     # Expiry, the reaper and undeclared-operation cancellation have no actor. The sentinel keeps the
     # triple not-null so no presenter or export branches on nil.

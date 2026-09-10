@@ -6,17 +6,14 @@ module ChangeRequests
   #
   # Write-once, for the same reason as QuorumPermission.
   class QuorumEligibleActor < Record
+    include Concerns::ActorColumns
     include Concerns::Immutable
 
     belongs_to :quorum, class_name: "ChangeRequests::Quorum",
                         foreign_key: :change_request_quorum_id,
                         inverse_of: :eligible_actors
 
-    # `actor_id` is a string: a User with a uuid key and an Admin with a bigint key share the column.
-    validates :actor_id, presence: true
-
-    # M1a-9 moves this to Concerns::ActorColumns.
-    validates :actor_type, presence: true,
-                           inclusion: { in: ->(_) { ChangeRequests.config.actor_types.keys } }
+    # No label: these rows name who *may* approve, not a decision that has been made.
+    actor_reference :actor, label: false
   end
 end
