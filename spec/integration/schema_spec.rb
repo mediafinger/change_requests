@@ -267,7 +267,83 @@ RSpec.describe "the generated schema" do
     end
   end
 
+  # A default is a contract: the migration promises a new row starts pending, on stage one, with one
+  # attempt allowed. The models rely on it rather than restating it.
+  describe "column defaults" do
+    {
+      %w(change_requests status) => "pending",
+      %w(change_requests current_stage_position) => "1",
+      %w(change_requests max_attempts) => "1",
+      %w(change_requests lock_version) => "0",
+      %w(change_request_stages status) => "pending",
+      %w(change_request_stages satisfied_by) => "any_quorum",
+      %w(change_request_quorums status) => "pending",
+      %w(change_request_quorums permission_match) => "any",
+    }.each do |(table, column), expected|
+      it "defaults #{table}.#{column} to #{expected}" do
+        # to_s because integer columns report a typed default and string columns a string.
+        expect(column_default(table, column).to_s).to eq(expected)
+      end
+    end
+
+    it "defaults every jsonb column to an empty object rather than null" do
+      defaults = [
+        column_default("change_requests", "payload"),
+        column_default("change_requests", "payload_labels"),
+        column_default("change_request_events", "metadata"),
+      ]
+
+      expect(defaults.uniq).to eq(["{}"])
+    end
+  end
+
+  # A NOT NULL the migration forgot is a column the models have to defend in Ruby forever.
+  describe "nullability" do
+    {
+      "change_requests" => %w(operation_key operation_version service method_name status payload
+                              payload_labels requester_type requester_id requester_label
+                              current_stage_position max_attempts lock_version),
+      "change_request_stages" => %w(change_request_id position name satisfied_by status),
+      "change_request_quorums" => %w(change_request_stage_id position threshold permission_match status),
+      "change_request_quorum_eligible_actors" => %w(change_request_quorum_id actor_type actor_id),
+      "change_request_approvals" => %w(change_request_id change_request_stage_id approver_type
+                                       approver_id approver_label decision decided_at),
+      "change_request_events" => %w(change_request_id actor_type actor_id actor_label kind
+                                    operation_version metadata occurred_at created_at),
+      "change_request_attempts" => %w(change_request_id number),
+    }.each do |table, columns|
+      it "makes #{table}'s required columns NOT NULL" do
+        nullable = connection.columns(table).select { |c| columns.include?(c.name) && c.null }
+
+        expect(nullable.map(&:name)).to be_empty
+      end
+    end
+
+    it "leaves the columns that are genuinely optional nullable" do
+      optional = {
+        "change_requests" => %w(executer_type executer_id executer_label tenant_type tenant_id
+                                tenant_label expires_at executed_at overridden_at),
+        "change_request_quorums" => %w(name satisfied_at),
+        "change_request_quorum_permissions" => %w(permission actor_type),
+        "change_request_approvals" => %w(approver_identity comment),
+        "change_request_events" => %w(body),
+        "change_request_attempts" => %w(outcome error_class error_message backtrace),
+      }
+
+      not_nullable = optional.flat_map do |table, columns|
+        connection.columns(table).reject(&:null).select { |c| columns.include?(c.name) }
+                  .map { |c| "#{table}.#{c.name}" }
+      end
+
+      expect(not_nullable).to be_empty
+    end
+  end
+
   # Helpers. Raw SQL throughout: there are no models until M1a-3, and the point is the database.
+  def column_default(table, column)
+    connection.columns(table).find { |c| c.name == column }&.default
+  end
+
   def column_type(table, column)
     connection.columns(table).find { |c| c.name == column }&.sql_type
   end
