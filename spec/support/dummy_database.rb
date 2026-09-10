@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "gem_schema"
+
 # Creates the dummy app's database if it is missing and loads its schema.
 #
 # Deliberately not a `db:test:prepare` the developer has to remember: a first `bundle exec rspec` on
@@ -16,6 +18,10 @@ module DummyDatabase
 
     ActiveRecord::Base.establish_connection(db_config)
     load_schema
+
+    # The gem's own nine tables, from the install generator's migration template rather than from a
+    # schema.rb copied out of it - so the suite exercises the artefact a host runs (M1a-2).
+    GemSchema.reset!
   end
 
   def db_config
