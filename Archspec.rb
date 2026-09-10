@@ -1,21 +1,10 @@
 # frozen_string_literal: true
 
-# The architecture in PLAN.md §1 and §2, executable.
-#
-# The seam this file guards: a headless domain core that needs ActiveRecord and ActiveSupport and
-# nothing else, with Rails confined to a single engine file. It is what makes
-# `spec/integration/headless_spec.rb` pass, what lets a host use the gem from a rake task or an API,
-# and what would keep a future split into `change_requests` + `change_requests-rails` a `git mv`
-# rather than a rewrite.
-#
-# Run by `rake archspec`, and as part of `rake ci`.
+# PLAN.md §1 and §2 as executable rules. Run by `rake archspec`, and by `rake ci`.
 
 source "lib/**/*.rb"
 
-# ── The layers of §1 ──────────────────────────────────────────────────────────────────────────────
-#
-# `app/` and `lib/generators/` are not listed: they hold no Ruby yet. M6 and M7 add them, and this
-# file is where their boundaries get written down.
+# app/ and lib/generators/ hold no Ruby yet. M6 and M7 add their boundaries here.
 
 component :domain, in: [
   "lib/change_requests.rb",
@@ -34,13 +23,8 @@ component :domain, in: [
 
 component :engine, in: "lib/change_requests/engine.rb"
 
-# ── The dependency rule of §2 ─────────────────────────────────────────────────────────────────────
-#
-# "Nothing under lib/change_requests/{models,operation,guards,commands,authorization,execution,
-# presenters} may reference ActionController, ActionView, Rails, or any constant under app/."
-#
-# Applied to the whole domain layer rather than only those seven directories: every file under
-# lib/change_requests/ except the engine is domain code, and the same rule serves all of it.
+# §2's dependency rule, applied to the whole domain layer rather than the seven directories it
+# names: every file under lib/change_requests/ except the engine is domain code.
 domain.cannot_reference_constants "Rails",
                                   "ActionController",
                                   "ActionView",
@@ -52,7 +36,5 @@ domain.cannot_reference_constants "Rails",
                                            "§8's background execution is defined only when the " \
                                            "host has it."
 
-# The engine is the Rails integration layer, so it may know about Rails - but the arrow only points
-# one way. The domain must never reach back into it, or requiring the gem headlessly would load the
-# very file that requires Rails.
+# The arrow points one way. A domain file reaching into the engine would load Rails headlessly.
 domain.cannot_use :engine

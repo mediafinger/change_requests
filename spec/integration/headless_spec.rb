@@ -1,10 +1,6 @@
 # frozen_string_literal: true
 
-# The seam described in §1, proven rather than asserted: the domain core is ActiveRecord and
-# ActiveSupport only, and works with no Rails, no engine and no locale files.
-#
-# It has to run out of process. This suite loads the dummy app, so `Rails` is defined here whatever
-# the gem does - an in-process check would pass for the wrong reason, or fail on load order.
+# Out of process: this suite loads the dummy app, so Rails is defined here whatever the gem does.
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "the domain core, headless" do
   subject(:probe) { ruby_script("spec/integration/headless_script.rb") }

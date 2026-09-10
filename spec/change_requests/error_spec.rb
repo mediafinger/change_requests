@@ -1,10 +1,7 @@
 # frozen_string_literal: true
 
 RSpec.describe ChangeRequests::Error do
-  # The ancestry is the contract: a host writes `rescue ChangeRequests::TransitionError` once and
-  # expects every refusal to land there. Moving a class between branches is a breaking change, so
-  # every edge of §7's tree is asserted rather than assumed. Names, not constants, so the table reads
-  # like the tree in the documentation.
+  # The ancestry is the contract: moving a class between branches breaks a host's rescue.
   def self.taxonomy
     {
       "ConfigurationError"   => "Error",

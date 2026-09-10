@@ -2,12 +2,8 @@
 
 module ChangeRequests
   class Configuration
-    # What `config.actor_type` and `config.tenant_type` have in common: a host class the gem is
-    # allowed to reference, the type of its primary key, and how to turn one of its records into a
-    # label (§9.1, §10).
-    #
-    # The registration list is simultaneously the `*_type` allowlist (§5.7 consequence 5), the label
-    # source and the per-type key cast - so a typo fails at boot rather than at render time.
+    # Shared by actor_type and tenant_type. The registration list is at once the `*_type` allowlist
+    # (§5.7), the label source and the per-type key cast, so a typo fails at boot.
     class RegisteredType
       KEY_TYPES = %i(uuid integer string).freeze
 

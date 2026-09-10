@@ -2,13 +2,8 @@
 
 require "rails_helper"
 
-# The install generator's migration is the artefact a host runs, so it is driven the way a host runs
-# it - through `MigrationContext`, the same code path as `rails db:migrate` - rather than by loading
-# a schema.rb copied out of it (risk **R2**).
-#
-# Each example migrates inside the per-example transaction that `use_transactional_fixtures` opens,
-# and PostgreSQL rolls DDL back like anything else. So dropping every table here cannot strand the
-# specs that run after it, whatever order they run in.
+# Dropping every table here is safe in any order: PostgreSQL rolls DDL back with the per-example
+# transaction.
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "the install migration" do
   it "has created the nine tables the suite runs against" do

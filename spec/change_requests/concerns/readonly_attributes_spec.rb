@@ -30,9 +30,7 @@ RSpec.describe ChangeRequests::Concerns::ReadonlyAttributes do
   end
 
   describe "changing a declared attribute" do
-    # The whole point of the list is that a snapshot cannot drift, so the one outcome it must not
-    # have is silence - which is what Rails' `attr_readonly` gives unless the *host application* has
-    # `raise_on_assign_to_attr_readonly` enabled (issue I4).
+    # attr_readonly is silent unless the host app enabled raise_on_assign_to_attr_readonly (I4).
     it "raises rather than discarding the change quietly" do
       probe.operation_key = "something.else"
 

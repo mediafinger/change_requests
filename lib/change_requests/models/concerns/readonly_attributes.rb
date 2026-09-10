@@ -2,18 +2,11 @@
 
 module ChangeRequests
   module Concerns
-    # Creation-time facts that must not change afterwards (§5.1):
+    #   readonly_after_create :operation_key, :service, :payload
     #
-    #   readonly_after_create :operation_key, :service, :payload, :requester_label
-    #
-    # Deliberately **not** Rails' `attr_readonly`. That discards the assignment in silence unless the
-    # host application has `ActiveRecord.raise_on_assign_to_attr_readonly` enabled - a global setting
-    # a gem cannot control and a host can turn off. The whole point of this list is that a snapshot
-    # cannot drift, so silence is the one outcome it must not have (issue I4).
-    #
-    # Raising from `before_update` also means the guard holds for every path that reaches the
-    # database - `update_columns` excepted, which bypasses callbacks by design and is nobody's
-    # accident.
+    # Not Rails' attr_readonly: that discards the assignment silently unless the *host app* enabled
+    # ActiveRecord.raise_on_assign_to_attr_readonly, which a gem cannot control (issue I4).
+    # update_columns bypasses this, by design.
     module ReadonlyAttributes
       extend ActiveSupport::Concern
 

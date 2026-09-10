@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-# The gem never requires I18n - the domain core has to produce messages headless, with no Rails and
-# no locale files (§1, §15.5) - so `I18n` is genuinely undefined in this suite. A verified double
-# cannot stand in for a constant that was never loaded, so this is a real object that records what it
-# was asked to translate.
+# A real object, not a verified double: those cannot stand in for a constant that may be unloaded,
+# and RSpec/VerifiedDoubleReference autocorrects `class_double("I18n")` into a NameError.
 module I18nStub
-  # Returns the recorded calls, so a spec can assert the key *and* the fallback that was passed.
+  # Returns the recorded calls, so a spec can assert the key and the fallback that was passed.
   def with_i18n(returning: "translated")
     calls = []
 

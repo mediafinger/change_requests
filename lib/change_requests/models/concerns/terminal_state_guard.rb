@@ -2,21 +2,11 @@
 
 module ChangeRequests
   module Concerns
-    # Terminal-state protection at the model layer (§5.8):
-    #
     #   terminal_states :successful, :rejected, :canceled, :expired
     #
-    # A row whose status was already final refuses every further update, so the rule holds even when
-    # a caller bypasses the commands entirely. The commands are where the good error messages live;
-    # this is the floor beneath them.
-    #
-    # Two things it deliberately does not do:
-    #
-    #   * It does not block the transition *into* a final state. The check reads `status_was`, the
-    #     value the row had before this save, so `pending → canceled` passes and `canceled →`
-    #     anything does not.
-    #   * It does not stop an audit trail growing. Events and attempts are their own rows, and
-    #     commenting on a finished request is the point of having one (§5.5).
+    # Floor beneath the commands: holds even when a caller bypasses them (§5.8). Reads status_was, so
+    # the transition *into* a final state passes. Says nothing about events or attempts, which are
+    # separate rows - commenting on a finished request is allowed (§5.5).
     module TerminalStateGuard
       extend ActiveSupport::Concern
 

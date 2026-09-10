@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.describe ChangeRequests::Translation do
-  # M0-4 built this against a gem that required only zeitwerk, where I18n could genuinely be absent.
-  # M1a-1 changed that: the domain core is ActiveRecord (§2), ActiveRecord brings ActiveSupport, and
-  # ActiveSupport brings the i18n gem. So I18n now arrives with the gem whether a host asked for it
-  # or not, and the interesting claim is no longer "it copes without I18n" but "it copes without a
-  # *translation*" - which is the state every key is in until M1b-13 writes the locale file.
-  #
-  # The unavailable branch is kept and still tested: it costs nothing, and this module is also what
-  # §5.9's stage and quorum labels will go through.
+  # Since M1a-1 the gem requires ActiveRecord, which brings ActiveSupport, which brings i18n - so
+  # I18n is always loaded and `available?` cannot be false in an ordinary process. The claim that
+  # matters is coping without a *translation*, which is every key until M1b-13.
   def self.headless
     <<~'RUBY'
       require "change_requests"
