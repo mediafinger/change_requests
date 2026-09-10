@@ -14,6 +14,9 @@ AllCops:
 Gemspec/DevelopmentDependencies:
   EnforcedStyle: gemspec
 
+Lint/EmptyClass:
+  AllowComments: true # a class whose body is a comment is a documented placeholder, not an oversight
+
 Layout/EmptyLineBetweenDefs:
   AllowAdjacentOneLineDefs: true
 
