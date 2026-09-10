@@ -42,13 +42,13 @@ end
 
 RSpec::Core::RakeTask.new(:rspec)
 
-# §15.5, both halves: the domain core runs with Rails never required, and no file under
-# lib/change_requests/ except the engine references a Rails constant.
+# §15.5's runtime half: the domain core loads, connects and runs with Rails never required. Its
+# static half - that no domain file references a Rails constant - is `rake archspec` below.
 #
-# Run on their own in CI as well as inside the full suite, because running them alone is a stronger
+# Run on its own in CI as well as inside the full suite, because running it alone is a stronger
 # claim: the parent process never loads Rails either, so nothing can pass for the wrong reason.
 RSpec::Core::RakeTask.new(:headless) do |task|
-  task.pattern = "spec/integration/headless_spec.rb,spec/integration/domain_purity_spec.rb"
+  task.pattern = "spec/integration/headless_spec.rb"
 end
 
 # §15.4. Needs no database and no dummy application - it reads the gemspec.
@@ -58,8 +58,9 @@ end
 
 RuboCop::RakeTask.new
 
-# The architecture in PLAN.md §1 and §2, checked statically - see Archspec.rb for the rules. It
-# parses rather than boots, so it needs no database and no dummy application.
+# The architecture in PLAN.md §1 and §2, checked statically - see Archspec.rb for the rules. This
+# is §15.5's static half, and it checks rather more besides: layer boundaries, and every directory
+# M6 and M7 add. It parses rather than boots, so it needs no database and no dummy application.
 desc "Check the architecture boundaries in Archspec.rb"
 task :archspec do
   sh "archspec", "check"
