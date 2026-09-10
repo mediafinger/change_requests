@@ -1225,7 +1225,7 @@ module ChangeRequests
       def reason                      # nil when allowed, an i18n-able symbol/message otherwise
         return :operation_undeclared unless operation                # §5.11, checked in Guards::Base
         return :not_pending      unless request.pending?
-        return :requester        if same_person?(request.requester, actor)   # hard-wired; §8
+        return :requester        if same_person?(request.requester, actor)   # never configurable; §8
         return :stage_not_current unless stage == request.current_stage
         return :already_decided  if stage.approvals.exists?(approver_type:, approver_id:)
         return :not_permitted    if eligible_quorums.empty?
@@ -1432,10 +1432,9 @@ Additional guarantees:
 **Separation of duties** becomes explicit configuration rather than an accident:
 
 ```ruby
-config.requester_may_approve  = false  # hard-wired false; setting true raises ConfigurationError
 config.requester_may_execute  = false  # a choice, not a default assumption
 config.approver_may_execute   = true
-config.requester_may_override = false  # hard-wired false - see §8.1
+config.requester_may_override = false  # a choice too, but think hard - see §8.1
 ```
 
 ### 8.1 Override
@@ -1475,9 +1474,12 @@ retrospectively unnecessary.
 
 **Guarding it.** `Guards::Execute` gains an override branch - `override_allowed?` requires the action to
 declare `op.override`, the actor to satisfy those permissions, and a reason when `require_reason`. The
-request must be non-final and not already `executing`. `config.requester_may_override` is hard-wired
-`false`: a requester who can override their own request has not been slowed down by the gem at all, which
-is a total bypass rather than an exception to the rule.
+request must be non-final and not already `executing`. `config.requester_may_override` defaults to `false`
+and a host that turns it on should know what it is buying: a requester who can override their own request
+has not been slowed down by the gem at all. Unlike approval - which is never the requester's to give (§8) -
+an override is already an accountable, reasoned, separately permissioned exception that lands in the audit
+trail as one, so a small team where the requester *is* the security officer is a real situation rather than
+a bypass in disguise. It stays off until someone says otherwise.
 
 **Surfacing it.** A separate `Value::Action(name: :execute_override, tone: :danger, confirm: …)`, so it is a
 visibly different, always-confirmed button rather than the normal Execute quietly lighting up; the status
@@ -1628,9 +1630,10 @@ ChangeRequests.configure do |config|
   config.actor_identity           = nil         # ->(actor) { actor.person_id } - see §9.4
 
   # ── separation of duties ─────────────────────────────────────────────────
+  # (approval by the requester is not a setting - it is refused outright; §8)
   config.requester_may_execute  = false
   config.approver_may_execute   = true
-  config.requester_may_override = false         # hard-wired; §8.1
+  config.requester_may_override = false         # default; §8.1
 
   # ── execution ────────────────────────────────────────────────────────────
   config.execution_mode        = :inline        # :inline | :background
@@ -2298,6 +2301,9 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
     `label "System"`.
 16. **`kind` is a validation, not a CHECK constraint.** Later milestones add kinds; a CHECK would make each
     one a migration in every host application.
+17. **`config.requester_may_override` is an ordinary setting defaulting to `false`.** An override is
+    already reasoned, separately permissioned and audited as an exception, so a host that genuinely needs
+    the requester to be able to take it may say so (§8.1).
 
 ## 20. Appendix: salvage from the existing implementations
 
