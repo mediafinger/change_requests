@@ -263,7 +263,7 @@ stage. This avoids a painful schema migration later, and costs one extra table n
 
 | Column                      | Type                                  | Notes                                                          |
 |-----------------------------|---------------------------------------|----------------------------------------------------------------|
-| `id`                        | uuid (or bigint)                      | PK type chosen at install time                                 |
+| `id`                        | uuid, not null                        | every gem-owned key is a uuid - see §5.7                       |
 | `operation_key`             | string, not null                      | operation key, e.g. `"members.update_roles"`                   |
 | `service`                   | string, not null                      | resolved from the operation **at creation**, stored for audit  |
 | `method_name`               | string, not null                      | ditto                                                          |
@@ -312,7 +312,7 @@ groups are consecutive stages. There is no request-level mode column.
 
 | Column              | Type                                     | Notes                                              |
 |---------------------|------------------------------------------|----------------------------------------------------|
-| `id`                | uuid/bigint                              |                                                    |
+| `id`                | uuid                                     |                                                    |
 | `change_request_id` | FK, not null                             |                                                    |
 | `position`          | integer, not null                        | unique with request_id; stages advance in order    |
 | `name`              | string, not null                         | declaration identifier, `snake_case`; §5.9         |
@@ -334,7 +334,7 @@ is, or **all**, per `satisfied_by`. Counting approvals is the only rule; there i
 
 | Column                    | Type                                  | Notes                                                            |
 |---------------------------|---------------------------------------|------------------------------------------------------------------|
-| `id`                      | uuid/bigint                           |                                                                  |
+| `id`                      | uuid                                  |                                                                  |
 | `change_request_stage_id` | FK, not null                          |                                                                  |
 | `position`                | integer, not null                     | unique with stage_id; display order only                         |
 | `name`                    | string, null                          | declaration identifier; null when the stage has one quorum; §5.9 |
@@ -478,7 +478,7 @@ request.
 
 | Column                    | Type               | Notes                                    |
 |---------------------------|--------------------|------------------------------------------|
-| `id`                      | uuid/bigint        |                                          |
+| `id`                      | uuid               |                                          |
 | `change_request_id`       | FK, not null       | denormalised for cheap counting/scoping  |
 | `change_request_stage_id` | FK, not null       |                                          |
 | `approver_type`           | string, not null   | allowlisted, see §5.7                    |
@@ -504,7 +504,7 @@ request is authoritative.
 
 | Column              | Type                          | Notes                                                      |
 |---------------------|-------------------------------|------------------------------------------------------------|
-| `id`                | uuid/bigint                   |                                                            |
+| `id`                | uuid                          |                                                            |
 | `change_request_id` | FK, not null                  |                                                            |
 | `actor_type`        | string, not null              | `"System"` for gem-originated events - see below           |
 | `actor_id`          | string, not null              | `"system"` for the system actor - never a host id          |
@@ -580,6 +580,22 @@ attempt and in the `execution_failed` event, and the presenter reads the latest 
 
 ### 5.7 Schema principles
 
+**Every gem-owned key is a uuid.** All nine tables use `id: :uuid` primary keys, and every foreign key
+between them (`change_request_id`, `change_request_stage_id`, `change_request_quorum_id`,
+`change_request_approval_id`) is `type: :uuid` to match. There is no install-time choice and no bigint
+variant: one shape means one migration template, one set of specs, and no branch anywhere in the gem that
+has to ask what a key looks like. `pgcrypto` / `gen_random_uuid()` is available unconditionally on the
+PostgreSQL versions this gem supports, so it costs a default and nothing else.
+
+Two things this deliberately does **not** decide:
+
+- **The host's own tables.** A host whose `users` table has a bigint primary key is entirely normal and
+  entirely unaffected - the gem holds no foreign key to it (below).
+- **`config.actor_type … t.key_type`.** That stays `:uuid | :integer | :string` per registered actor class
+  (§9.1), because it describes the *host's* key, which the gem stores as a string in a polymorphic column
+  and casts back through the resolver. The two settings are unrelated, and conflating them is the mistake
+  the sentence above exists to prevent.
+
 **No PostgreSQL enums.** Status and other enumerated columns are `string` + an inclusion validation + a
 CHECK constraint in the generated migration. A PG enum makes migrations depend on application config at
 migration time and needs a hand-written `ALTER TYPE … ADD VALUE` per new value; it buys nothing here.
@@ -606,10 +622,11 @@ Applied to `requester`, `executer`, `approver`, event `actor`, attempt `executer
 
 Six consequences, each deliberate:
 
-1. **`*_id` is a `string` column.** It has to be: a `User` with a uuid PK and an `Admin` with a bigint PK
-   must sit in the same column. Casting back happens in the resolver, which knows each registered type's
-   key type. That is the price of heterogeneous actors, and it is the right one - the alternative is a
-   column per actor class, which is not extensible by a host at all.
+1. **`*_id` is a `string` column** - and this is the one place a key is *not* a uuid, deliberately. It has
+   to be: a `User` with a uuid PK and an `Admin` with a bigint PK must sit in the same column. Casting back
+   happens in the resolver, which knows each registered type's key type. That is the price of heterogeneous
+   actors, and it is the right one - the alternative is a column per actor class, which is not extensible by
+   a host at all. Gem-owned keys are uuids; *host* keys are whatever the host chose, stored as text.
 
 2. **No foreign keys to host tables, and no `belongs_to`.** Between the gem's *own* tables
    (`change_request_id`, `change_request_stage_id`) foreign keys and `ON DELETE CASCADE` stay - those
@@ -799,7 +816,7 @@ method to create a request, one command per transition, and one scope to list wh
 ### 6.1 Install
 
 ```bash
-bin/rails generate change_requests:install --primary-key-type=uuid --with-specs
+bin/rails generate change_requests:install --with-specs
 bin/rails db:migrate
 ```
 
@@ -1898,11 +1915,12 @@ suite for free.
 | `change_requests:migration_upgrade`         | schema migrations between gem majors                                                           |
 
 Install generator options:
-`--primary-key-type=uuid --actor-types=User,Admin --tenant-types=Organization --skip-tenant
+`--actor-types=User,Admin --tenant-types=Organization --skip-tenant
  --with-specs --mount-at=/change_requests`
 
-`--primary-key-type` governs the gem's **own** primary keys only. The generator asks nothing about the
-host's actor tables and writes no reference to them: `--actor-types` merely pre-fills the initializer's
+**There is no `--primary-key-type`.** The gem's own primary keys are uuids, always (§5.7), so the one thing
+the generator would have asked about is already decided. The generator asks nothing about the host's actor
+tables either, and writes no reference to them: `--actor-types` merely pre-fills the initializer's
 `config.actor_type` blocks as commented stubs, and passing nothing is fine - the schema is identical either
 way. Adding a fourth actor class later is an initializer edit, never a migration.
 
@@ -2267,8 +2285,11 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
    the full `op.workflow` DSL, `op.cooldown`, `verify!` and `ChangeRequests.request!`.
 10. **`Guards::Execute` ships in M1b; `Commands::Execute` and the override branch ship in M3a.** The guard's
     inputs are all M1 state; the claim-then-invoke machinery is not.
-11. **The gem's own suite runs on `uuid` primary keys**, since that exercises the string-cast path in §5.7.
-    One migration-only CI job runs the same template with `bigint` and asserts the resulting schema.
+11. **Every gem-owned key is a uuid** (§5.7). All nine tables and every foreign key between them are
+    uuids, with no install-time choice, no `--primary-key-type` flag and no bigint variant to test. This
+    replaces the earlier "uuid or bigint, chosen at install time": one shape is worth more than the
+    flexibility, and the flexibility was never asked for. A host's own tables are untouched by this, and
+    `config.actor_type … t.key_type` is a different setting describing a different key.
 12. **No `attempts_count` column.** `change_request_attempts` rows are the count (§5.6).
 13. **No `idempotency_key` column.** The request's own id is handed to targets that declare a
     `change_request_id:` keyword, and the `executing` claim is what prevents double execution (§8).
