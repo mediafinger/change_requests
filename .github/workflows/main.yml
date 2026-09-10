@@ -10,10 +10,31 @@ on:
 permissions:
   contents: read
 
+# The jobs from PLAN.md §15.6, split so a failure names itself: "rubocop" and "rspec" fail for very
+# different reasons, and finding out which took the run is not a job for the log viewer.
+#
+# Only the jobs that touch the dummy application need PostgreSQL. The rest deliberately run without
+# a database, which is a small proof in itself: linting, packaging and the headless core do not need
+# one.
 jobs:
-  build:
+  rubocop:
     runs-on: ubuntu-latest
-    name: Ruby ${{ matrix.ruby }} / ${{ matrix.gemfile }}
+    name: RuboCop
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake rubocop
+
+  rspec:
+    runs-on: ubuntu-latest
+    name: RSpec / Ruby ${{ matrix.ruby }} / ${{ matrix.gemfile }}
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +44,8 @@ jobs:
           - gemfiles/rails_8.1.gemfile
 
     # PostgreSQL only, deliberately: no sqlite fallback and no second adapter to keep working
-    # (PLAN.md 18). The dummy app in spec/dummy runs against this.
+    # (PLAN.md §18). There is no second schema job either - every gem-owned key is a uuid and
+    # nothing else (§19.11), so there is no alternative migration shape to prove.
     services:
       postgres:
         image: postgres:18
@@ -56,5 +78,87 @@ jobs:
           bundler-cache: true
       - name: Prepare the dummy application's database
         run: bundle exec rake dummy:db:prepare
-      - name: Run the default task
-        run: bundle exec rake
+      - run: bundle exec rake rspec
+
+  audit:
+    runs-on: ubuntu-latest
+    name: Bundler audit
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake bundle:audit
+
+  headless:
+    runs-on: ubuntu-latest
+    name: Headless core
+
+    # §15.5. Its own job rather than only a spec inside the suite: run alone, the parent process
+    # never loads Rails either, so neither half can pass for the wrong reason. It needs PostgreSQL
+    # because the point is a *bare ActiveRecord connection* - no database.yml, no Rails.application.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: change_requests_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake headless
+
+  packaging:
+    runs-on: ubuntu-latest
+    name: Packaging
+
+    # §15.4. Reads the gemspec, so it needs neither a database nor the dummy application. It is the
+    # only job that would catch a directory renamed out of `spec.files`, which otherwise surfaces as
+    # an adopter's failed `rails g change_requests:install`.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake packaging
+
+  # The job §15.6 calls "the test that catches everything the dummy app's `path:` dependency hides":
+  # generate a throwaway Rails app, run `change_requests:install`, run the migrations, boot it.
+  #
+  # It has nothing to run until M7 writes the generators, and a job that vacuously passes is worse
+  # than no job, so it waits here rather than pretending.
+  #
+  # generators-on-a-real-app:
+  #   runs-on: ubuntu-latest
+  #   name: Generators on a real app
+  #   steps:
+  #     - run: bundle exec rake generators:on_a_real_app

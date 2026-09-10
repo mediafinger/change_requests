@@ -42,6 +42,20 @@ end
 
 RSpec::Core::RakeTask.new(:rspec)
 
+# §15.5, both halves: the domain core runs with Rails never required, and no file under
+# lib/change_requests/ except the engine references a Rails constant.
+#
+# Run on their own in CI as well as inside the full suite, because running them alone is a stronger
+# claim: the parent process never loads Rails either, so nothing can pass for the wrong reason.
+RSpec::Core::RakeTask.new(:headless) do |task|
+  task.pattern = "spec/integration/headless_spec.rb,spec/integration/domain_purity_spec.rb"
+end
+
+# §15.4. Needs no database and no dummy application - it reads the gemspec.
+RSpec::Core::RakeTask.new(:packaging) do |task|
+  task.pattern = "spec/integration/packaging_spec.rb,spec/gemspec_spec.rb"
+end
+
 RuboCop::RakeTask.new
 
 desc "Open a console with ChangeRequests loaded"
