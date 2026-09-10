@@ -2147,9 +2147,15 @@ Plus a static check that no file under the domain directories mentions `ActionCo
 - Ruby: `4.0` _(older versions might be tested when requested)_
 - Rails: `8.1` via `gemfiles/*.gemfile` + `BUNDLE_GEMFILE` _(older versions might be tested when requested)_
 - PostgreSQL: `18` service containers _(older DBs might be supported when requested)_
-- Jobs: `rubocop`, `rspec` (matrix), `bundle:audit`, `headless`, `packaging`, `generators-on-a-real-app`
-  (generate a throwaway Rails app, run `change_requests:install`, run the migrations, boot it - the test
-  that catches everything the dummy app's `path:` dependency hides)
+- Jobs: the specs, plus the linters, static analysis and security checks the repository accumulates -
+  which of them share a job is a question about queue time and runner setup, not about the design, so it
+  is settled in the workflow file rather than here. Two rules do belong here: the checks that need no
+  database say so by not asking for one, and every check is its own `rake` task, so a developer runs
+  exactly what CI runs.
+- One job is a design decision rather than a grouping: `generators-on-a-real-app` (generate a throwaway
+  Rails app, run `change_requests:install`, run the migrations, boot it) must not run against this
+  repository's bundle, which is the whole point of it - it catches everything the dummy app's `path:`
+  dependency hides.
 
 ## 16. Feature list for 1.0
 
