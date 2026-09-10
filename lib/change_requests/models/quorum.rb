@@ -31,6 +31,12 @@ module ChangeRequests
                                foreign_key: :change_request_quorum_id,
                                inverse_of: :quorum
 
+    # What satisfies it: linked at decision time, never re-derived (§5.3).
+    has_many :approval_quorums, class_name: "ChangeRequests::ApprovalQuorum",
+                                foreign_key: :change_request_quorum_id,
+                                inverse_of: :quorum
+    has_many :approvals, through: :approval_quorums, source: :approval
+
     validates :permission_match, inclusion: { in: PERMISSION_MATCHES }
     validates :threshold, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
     validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 1 },

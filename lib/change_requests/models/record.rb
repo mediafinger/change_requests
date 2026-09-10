@@ -8,5 +8,10 @@ module ChangeRequests
   # either Request or a mistake - record_spec asserts it.
   class Record < ::ActiveRecord::Base
     self.abstract_class = true
+
+    # `belongs_to` reads this when the association is *declared*, and these models are loaded by
+    # Zeitwerk before Rails sets it on ActiveRecord::Base - so without this every belongs_to here is
+    # optional, whatever the host configured. Set on the base class, which loads first.
+    self.belongs_to_required_by_default = true
   end
 end
