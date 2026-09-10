@@ -17,12 +17,6 @@ Gemspec/DevelopmentDependencies:
 Lint/EmptyClass:
   AllowComments: true # a class whose body is a comment is a documented placeholder, not an oversight
 
-Naming/PredicateMethod:
-  # Config keys read as settings, not questions: `config.requester_may_approve`, not `...approve?`.
-  AllowedMethods:
-    - requester_may_approve
-    - requester_may_override
-
 Layout/EmptyLineBetweenDefs:
   AllowAdjacentOneLineDefs: true
 

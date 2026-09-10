@@ -37,6 +37,10 @@ RSpec.describe ChangeRequests::Configuration do
       expect(config.approver_may_execute).to be(true)
     end
 
+    it "keeps the break-glass override off until a host asks for it (§8.1)" do
+      expect(config.requester_may_override).to be(false)
+    end
+
     it "stops the request on a rejection, attempts once, and never expires" do
       expect(config.only_record_rejections).to be(false)
       expect(config.default_max_attempts).to eq(1)
@@ -97,24 +101,11 @@ RSpec.describe ChangeRequests::Configuration do
     end
   end
 
-  describe "settings that are hard-wired" do
-    it "refuses to let a requester approve their own request" do
-      expect { config.requester_may_approve = true }
-        .to raise_error(ChangeRequests::ConfigurationError, /hard-wired false/)
-    end
+  describe "#requester_may_override" do
+    it "can be turned on by a host that means it (§8.1)" do
+      config.requester_may_override = true
 
-    it "refuses even an assignment of false, so the setting cannot look configurable" do
-      expect { config.requester_may_approve = false }
-        .to raise_error(ChangeRequests::ConfigurationError)
-    end
-
-    it "reads as false" do
-      expect(config.requester_may_approve).to be(false)
-    end
-
-    it "refuses to let a requester override their own request" do
-      expect { config.requester_may_override = true }
-        .to raise_error(ChangeRequests::ConfigurationError, /hard-wired false/)
+      expect(config.requester_may_override).to be(true)
     end
   end
 

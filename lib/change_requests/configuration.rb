@@ -17,9 +17,9 @@ module ChangeRequests
     # Authorization (§9.2)
     attr_accessor :authorization, :default_permission_match
 
-    # Separation of duties (§8). `requester_may_approve` and `requester_may_override` are not here:
-    # they are hard-wired false and only exist to refuse assignment.
-    attr_accessor :requester_may_execute, :approver_may_execute
+    # Separation of duties (§8, §8.1).
+    #
+    attr_accessor :approver_may_execute, :requester_may_execute, :requester_may_override
 
     # Workflow and execution defaults (§7.1, §8)
     attr_accessor :only_record_rejections, :default_max_attempts, :default_expires_in
@@ -34,8 +34,9 @@ module ChangeRequests
       @authorization            = Authorization::Permissions.new
       @default_permission_match = :any
 
-      @requester_may_execute = false
-      @approver_may_execute  = true
+      @requester_may_execute  = false
+      @approver_may_execute   = true
+      @requester_may_override = false
 
       @only_record_rejections = false
       @default_max_attempts   = 1
@@ -50,26 +51,6 @@ module ChangeRequests
 
     def tenant_type(name)
       register(@tenant_types, TenantType, name) { |type| yield(type) if block_given? }
-    end
-
-    # Hard-wired false: a requester who can approve their own request has not been slowed down by
-    # the gem at all (§8, §19.14). Guards compare identity directly and never read this.
-    def requester_may_approve = false
-
-    def requester_may_approve=(_value)
-      fail ConfigurationError,
-           "config.requester_may_approve is hard-wired false: a requester approving their own " \
-           "request defeats four-eyes, which is the gem's central promise. Remove the assignment."
-    end
-
-    # Hard-wired false for the same reason: an override by the requester is a total bypass rather
-    # than an accountable exception (§8.1).
-    def requester_may_override = false
-
-    def requester_may_override=(_value)
-      fail ConfigurationError,
-           "config.requester_may_override is hard-wired false: a requester who can override their " \
-           "own request has not been slowed down at all. Remove the assignment."
     end
 
     # Runs in the engine's `after_initialize` (§10). Reports every problem at once, so one boot
