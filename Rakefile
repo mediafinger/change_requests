@@ -67,22 +67,30 @@ task :archspec do
 end
 
 # Brakeman expects a Rails application, and this is a gem: the code lives in lib/, not app/, and
-# there is nothing to scan at the root until M6 adds app/controllers and app/views. `--force` is
-# what makes it scan anyway, and it does reach lib/ - a planted `eval` in the domain core is
-# reported, which is the point, because §6.12's dispatch resolves a class name and calls a method on
-# it. That is precisely the shape Brakeman's UnsafeReflection and Send checks exist for, and M2 and
-# M3 are where it lands.
+# there is nothing at the root to recognise until M6 adds app/controllers and app/views.
+# `--force-scan` is what makes it scan anyway - without it, it refuses *and exits 0*, which is the
+# worst of both worlds.
 #
-# Scanning spec/dummy instead was the obvious alternative and is worth less: it sees the dummy's own
-# four fixture models and none of the gem, because the gem is outside that directory. The gem root
-# is the target that grows - at M6 the same scan picks up the engine's controllers and views, where
-# XSS and redirect checks actually matter.
+# It does reach lib/: a planted `eval` in the domain core is reported. That is the point, because
+# §6.12's dispatch resolves a stored class name and calls a method on it, which is precisely the
+# shape UnsafeReflection and Send exist for. M2 and M3 are where that lands.
+#
+# Two things were measured rather than assumed, so they do not have to be re-litigated:
+#
+#   * `--add-engines-path .` and `--add-libs-path lib` add nothing here. They exist for engines and
+#     Ruby that live *outside* the scanned root; the gem root already is the root, and Brakeman
+#     scans app/, lib/ and config/ under it by default. Checked against a simulated M6 tree - a
+#     vulnerable controller and view under app/ - where plain `--force-scan` found all five
+#     warnings (CSRF, XSS, redirect, SQL injection, eval) and the extra flags changed nothing.
+#   * Scanning spec/dummy instead is worth less: it needs no --force-scan but reports the dummy's
+#     own four fixture models and none of the gem, which sits outside that directory. The gem root
+#     is also the target that grows into M6's controllers and views.
 #
 # Brakeman exits 3 when it finds a warning and 0 when it does not, so `sh` fails the build on its
 # own; the two --exit-on flags say so out loud rather than relying on that.
 desc "Scan for security warnings with Brakeman"
 task :brakeman do
-  sh "brakeman", "--force", "--no-progress", "--quiet", "--exit-on-error", "--exit-on-warn", "."
+  sh "brakeman", "--force-scan", "--no-progress", "--quiet", "--exit-on-error", "--exit-on-warn", "."
 end
 
 desc "Open a console with ChangeRequests loaded"

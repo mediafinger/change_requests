@@ -118,10 +118,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Security
 
-    # Brakeman expects a Rails application; this is a gem, so `--force` is what makes it scan at all.
-    # It does reach lib/, which is where every line of the gem lives - see the Rakefile for why the
-    # gem root is a better target than spec/dummy, and why this gets more useful at M2, M3 and M6
-    # rather than less.
+    # Brakeman expects a Rails application; this is a gem, so `--force-scan` is what makes it scan at
+    # all. It does reach lib/, which is where every line of the gem lives - see the Rakefile for why
+    # the gem root beats spec/dummy, why --add-engines-path and --add-libs-path add nothing here,
+    # and why this gets more useful at M2, M3 and M6 rather than less.
     steps:
       - uses: actions/checkout@v6
         with:
