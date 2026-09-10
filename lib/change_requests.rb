@@ -39,6 +39,33 @@ module ChangeRequests
       config
     end
 
+    # Loads the Rails integration layer if Rails is here and it is not loaded already. Idempotent,
+    # and safe to call at any point.
+    #
+    # It runs automatically when the gem is required, which is all a normal Rails host needs:
+    # `config/application.rb` loads Rails before `Bundler.require` reaches the gem. It is public
+    # because that order is not guaranteed - anything that requires this gem *before* Rails gets the
+    # domain core and no engine, and `require` is idempotent, so the automatic attempt never comes
+    # round again. A host in that position calls this once Rails is up. `spec/dummy` is exactly such
+    # a host, which is how the omission was found.
+    def load_engine!
+      # This method is the seam itself, so it holds the only two references the domain is allowed:
+      # the engine it may load, and the Rails constant that decides whether to. Both are guarded by
+      # `defined?`, which never raises on a missing constant - they are what *implements* §2's rule
+      # rather than breaking it. Every other domain file is held to it without exception.
+      #
+      # Fully qualified: a host with its own top-level `Engine` would otherwise satisfy this and
+      # silently keep ours from loading.
+      # archspec:disable-next-line dependencies.forbid -- the loader must name what it loads (§1)
+      return false if defined?(ChangeRequests::Engine)
+      # archspec:disable-next-line constants.forbid -- the guard that makes the Rails layer opt-in (§1)
+      return false unless defined?(::Rails::Engine)
+
+      require_relative "change_requests/engine"
+
+      true
+    end
+
     def setup_loader
       @loader = Zeitwerk::Loader.for_gem.tap do |loader|
         # Generators are loaded by Rails' own generator lookup; the host test kit is explicitly
@@ -75,9 +102,4 @@ ChangeRequests.setup_loader
 
 # Rails integration is opt-in by presence: a host that has Rails gets the engine, a rake task or a
 # bare ActiveRecord connection gets the domain core and nothing else (§1, §2).
-#
-# The one reference to Rails the domain is allowed, because it is the reference that *implements*
-# the rule rather than breaking it: `defined?` never raises on a missing constant, so this line is
-# what keeps Rails optional.
-# archspec:disable-next-line constants.forbid -- the guard that makes the Rails layer opt-in (§1)
-require_relative "change_requests/engine" if defined?(Rails::Engine)
+ChangeRequests.load_engine!
