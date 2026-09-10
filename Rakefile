@@ -66,12 +66,31 @@ task :archspec do
   sh "archspec", "check"
 end
 
+# Brakeman expects a Rails application, and this is a gem: the code lives in lib/, not app/, and
+# there is nothing to scan at the root until M6 adds app/controllers and app/views. `--force` is
+# what makes it scan anyway, and it does reach lib/ - a planted `eval` in the domain core is
+# reported, which is the point, because §6.12's dispatch resolves a class name and calls a method on
+# it. That is precisely the shape Brakeman's UnsafeReflection and Send checks exist for, and M2 and
+# M3 are where it lands.
+#
+# Scanning spec/dummy instead was the obvious alternative and is worth less: it sees the dummy's own
+# four fixture models and none of the gem, because the gem is outside that directory. The gem root
+# is the target that grows - at M6 the same scan picks up the engine's controllers and views, where
+# XSS and redirect checks actually matter.
+#
+# Brakeman exits 3 when it finds a warning and 0 when it does not, so `sh` fails the build on its
+# own; the two --exit-on flags say so out loud rather than relying on that.
+desc "Scan for security warnings with Brakeman"
+task :brakeman do
+  sh "brakeman", "--force", "--no-progress", "--quiet", "--exit-on-error", "--exit-on-warn", "."
+end
+
 desc "Open a console with ChangeRequests loaded"
 task :console do
   sh "bin/console"
 end
 
-desc "Run rubocop, the architecture checks and the specs, and check for known CVEs"
-task ci: %i(rubocop archspec rspec bundle:audit)
+desc "Run rubocop, the architecture and security checks, and the specs, and check for known CVEs"
+task ci: %i(rubocop archspec brakeman rspec bundle:audit)
 
 task default: :ci

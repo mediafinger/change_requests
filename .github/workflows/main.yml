@@ -13,9 +13,9 @@ permissions:
 # The jobs from PLAN.md §15.6, split so a failure names itself: "rubocop" and "rspec" fail for very
 # different reasons, and finding out which took the run is not a job for the log viewer.
 #
-# Only the jobs that touch the dummy application need PostgreSQL. The rest deliberately run without
-# a database, which is a small proof in itself: linting, packaging and the headless core do not need
-# one.
+# Only the jobs that touch the dummy application or a live connection need PostgreSQL - rspec and
+# the headless core. The other five deliberately run without a database, which is a small proof in
+# itself: linting, architecture, security and packaging never needed one.
 jobs:
   rubocop:
     runs-on: ubuntu-latest
@@ -113,6 +113,25 @@ jobs:
           ruby-version: '4.0.6'
           bundler-cache: true
       - run: bundle exec rake archspec
+
+  brakeman:
+    runs-on: ubuntu-latest
+    name: Security
+
+    # Brakeman expects a Rails application; this is a gem, so `--force` is what makes it scan at all.
+    # It does reach lib/, which is where every line of the gem lives - see the Rakefile for why the
+    # gem root is a better target than spec/dummy, and why this gets more useful at M2, M3 and M6
+    # rather than less.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake brakeman
 
   headless:
     runs-on: ubuntu-latest
