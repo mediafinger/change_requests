@@ -3,11 +3,9 @@
 require "zeitwerk"
 
 require_relative "change_requests/version"
+require_relative "change_requests/errors"
 
 module ChangeRequests
-  # The base of the error taxonomy. M0-4 fills in the tree beneath it (§7).
-  class Error < StandardError; end
-
   # Gem-originated events - expiry, the reaper, undeclared-operation cancellation, cooldown stage
   # closing - are attributed to a sentinel rather than to NULL, so "who did this" is answerable for
   # every audit row and no presenter has to branch on nil (§5.5, §19.15).
@@ -56,9 +54,11 @@ module ChangeRequests
         loader.collapse("#{__dir__}/change_requests/models")
         loader.collapse("#{__dir__}/change_requests/presenters")
 
-        # version.rb defines ChangeRequests::VERSION, not ChangeRequests::Version, and is required
-        # above. Left autoloadable it would fail eager loading.
+        # Both files hold constants Zeitwerk cannot infer from their name - version.rb defines
+        # VERSION rather than Version, errors.rb the whole taxonomy rather than an Errors namespace -
+        # so both are required above instead.
         loader.ignore("#{__dir__}/change_requests/version.rb")
+        loader.ignore("#{__dir__}/change_requests/errors.rb")
 
         loader.setup
       end
