@@ -60,6 +60,11 @@ module ChangeRequests
         loader.ignore("#{__dir__}/change_requests/version.rb")
         loader.ignore("#{__dir__}/change_requests/errors.rb")
 
+        # The engine is the one file that touches Rails (§1). Autoloading it would let an eager load
+        # in a headless process require Rails, so it is required below instead - and only when the
+        # host has already loaded Rails itself.
+        loader.ignore("#{__dir__}/change_requests/engine.rb")
+
         loader.setup
       end
     end
@@ -67,3 +72,7 @@ module ChangeRequests
 end
 
 ChangeRequests.setup_loader
+
+# Rails integration is opt-in by presence: a host that has Rails gets the engine, a rake task or a
+# bare ActiveRecord connection gets the domain core and nothing else (§1, §2).
+require_relative "change_requests/engine" if defined?(Rails::Engine)
