@@ -11,6 +11,14 @@ AllCops:
       - vendor/**/*
       - config.ru
 
+# Not everything under spec/ is a spec. The dummy application is a Rails app, and the headless script
+# is a standalone probe run by `ruby -Ilib` - both live here because that is where they belong, not
+# because RSpec's conventions apply to them.
+RSpec:
+  Exclude:
+    - spec/dummy/**/*
+    - spec/integration/headless_script.rb
+
 Gemspec/DevelopmentDependencies:
   EnforcedStyle: gemspec
 
