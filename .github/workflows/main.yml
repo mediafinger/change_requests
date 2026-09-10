@@ -95,13 +95,33 @@ jobs:
           bundler-cache: true
       - run: bundle exec rake bundle:audit
 
+  archspec:
+    runs-on: ubuntu-latest
+    name: Architecture
+
+    # PLAN.md §1 and §2 as executable rules - see Archspec.rb. It parses rather than boots, so it
+    # needs neither a database nor the dummy application, and it is the static half of §15.5: the
+    # headless job below proves the core *runs* without Rails, this proves it cannot quietly acquire
+    # a dependency on it.
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '4.0.6'
+          bundler-cache: true
+      - run: bundle exec rake archspec
+
   headless:
     runs-on: ubuntu-latest
     name: Headless core
 
-    # §15.5. Its own job rather than only a spec inside the suite: run alone, the parent process
-    # never loads Rails either, so neither half can pass for the wrong reason. It needs PostgreSQL
-    # because the point is a *bare ActiveRecord connection* - no database.yml, no Rails.application.
+    # §15.5's runtime half. Its own job rather than only a spec inside the suite: run alone, the
+    # parent process never loads Rails either, so it cannot pass for the wrong reason. It needs
+    # PostgreSQL because the point is a *bare ActiveRecord connection* - no database.yml, no
+    # Rails.application. The static half is the Architecture job above.
     services:
       postgres:
         image: postgres:18
