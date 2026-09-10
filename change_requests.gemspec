@@ -44,9 +44,9 @@ Gem::Specification.new do |spec|
 
   # the only runtime-dependencies
   #
-  spec.add_dependency "activerecord",  ">= 7.1"
-  spec.add_dependency "activesupport", ">= 7.1"
-  spec.add_dependency "railties",      ">= 7.1"
+  spec.add_dependency "activerecord",  ">= 8.1"
+  spec.add_dependency "activesupport", ">= 8.1"
+  spec.add_dependency "railties",      ">= 8.1"
   spec.add_dependency "zeitwerk",      ">= 2.6"
 
   # general development and test dependencies
@@ -61,7 +61,7 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "rubocop-rspec",                  "~> 3.10"
 
   # the dummy app and the specs that run against it - PostgreSQL only, deliberately no sqlite3
-  spec.add_development_dependency "activejob",                      ">= 7.1"
+  spec.add_development_dependency "activejob",                      ">= 8.1"
   spec.add_development_dependency "database_cleaner-active_record", ">= 2.2"
   spec.add_development_dependency "pg",                             ">= 1.5"
   spec.add_development_dependency "rspec-rails",                    ">= 7.1"

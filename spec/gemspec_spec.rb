@@ -15,10 +15,11 @@ RSpec.describe "change_requests.gemspec" do
         .to contain_exactly("activerecord", "activesupport", "railties", "zeitwerk")
     end
 
-    it "allows the Rails versions the engine supports" do
-      expect(requirement_for(gemspec.runtime_dependencies, "activerecord")).to eq(">= 7.1")
-      expect(requirement_for(gemspec.runtime_dependencies, "activesupport")).to eq(">= 7.1")
-      expect(requirement_for(gemspec.runtime_dependencies, "railties")).to eq(">= 7.1")
+    # PLAN.md 19.2: minimum Rails is 8.1. Nothing older is tested, and nothing older runs on Ruby 4.
+    it "requires the Rails version the gem is actually tested against" do
+      expect(requirement_for(gemspec.runtime_dependencies, "activerecord")).to eq(">= 8.1")
+      expect(requirement_for(gemspec.runtime_dependencies, "activesupport")).to eq(">= 8.1")
+      expect(requirement_for(gemspec.runtime_dependencies, "railties")).to eq(">= 8.1")
       expect(requirement_for(gemspec.runtime_dependencies, "zeitwerk")).to eq(">= 2.6")
     end
 
