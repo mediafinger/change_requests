@@ -23,6 +23,14 @@ module ChangeRequests
                        foreign_key: :change_request_stage_id,
                        inverse_of: :quorums
 
+    # Who qualifies. Both sets are write-once and the database cascades, so no `dependent:`.
+    has_many :permissions, class_name: "ChangeRequests::QuorumPermission",
+                           foreign_key: :change_request_quorum_id,
+                           inverse_of: :quorum
+    has_many :eligible_actors, class_name: "ChangeRequests::QuorumEligibleActor",
+                               foreign_key: :change_request_quorum_id,
+                               inverse_of: :quorum
+
     validates :permission_match, inclusion: { in: PERMISSION_MATCHES }
     validates :threshold, numericality: { only_integer: true, greater_than_or_equal_to: 1 }
     validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 1 },
