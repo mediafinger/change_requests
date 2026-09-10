@@ -47,5 +47,9 @@ RSpec.describe "change_requests.gemspec" do
     it "excludes the CI matrix gemfiles from the released gem" do
       expect(gemspec.files.grep(%r{\Agemfiles/})).to be_empty
     end
+
+    it "excludes the repository's own rake support from the released gem" do
+      expect(gemspec.files.grep(%r{\Atasks/})).to be_empty
+    end
   end
 end
