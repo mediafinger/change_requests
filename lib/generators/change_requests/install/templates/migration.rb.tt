@@ -1,0 +1,203 @@
+# frozen_string_literal: true
+
+# The nine tables of PLAN.md §4, generated into the host's own app by
+#   `rails g change_requests:install`
+#
+# No foreign key points at a host table, and none ever will.
+#
+class CreateChangeRequests < ActiveRecord::Migration[<%= migration_version %>]
+  def change
+    create_table :change_requests, id: :uuid do |t|
+      t.string :operation_key, null: false
+      t.string :operation_version, null: false
+      t.string :service, null: false
+      t.string :method_name, null: false
+
+      t.jsonb :payload, null: false, default: {}
+      t.jsonb :payload_labels, null: false, default: {}
+
+      t.string :status, null: false, default: "pending"
+
+      t.string :requester_type, null: false
+      t.string :requester_id, null: false
+      t.string :requester_label, null: false
+
+      t.string :executer_type
+      t.string :executer_id
+      t.string :executer_label
+
+      t.string :tenant_type
+      t.string :tenant_id
+      t.string :tenant_label
+
+      t.integer :current_stage_position, null: false, default: 1
+      t.integer :max_attempts, null: false, default: 1
+
+      t.datetime :expires_at, precision: 6
+      t.datetime :executed_at, precision: 6
+      t.datetime :overridden_at, precision: 6
+
+      t.integer :lock_version, null: false, default: 0
+
+      t.timestamps precision: 6, null: false
+    end
+
+    add_index :change_requests, :status
+    add_index :change_requests, :operation_key
+    add_index :change_requests, %i(requester_type requester_id)
+    add_index :change_requests, %i(executer_type executer_id)
+    add_index :change_requests, "tenant_type, tenant_id, status, created_at DESC", name: "index_change_requests_on_tenant_and_status"
+    add_index :change_requests, :expires_at, where: "status IN ('pending', 'approved')", name: "index_change_requests_on_expires_at_when_open"
+    add_index :change_requests, :overridden_at, where: "overridden_at IS NOT NULL", name: "index_change_requests_on_overridden_at_when_set"
+
+    add_check_constraint :change_requests, "status IN ('pending', 'approved', 'executing', 'successful', 'failed', 'rejected', 'canceled', 'expired')", name: "change_requests_status_check"
+    add_check_constraint :change_requests, "max_attempts >= 1", name: "change_requests_max_attempts_check"
+    add_check_constraint :change_requests, "current_stage_position >= 1", name: "change_requests_current_stage_position_check"
+
+
+    create_table :change_request_stages, id: :uuid do |t|
+      t.references :change_request, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.integer :position, null: false
+      t.string :name, null: false
+
+      t.string :satisfied_by, null: false, default: "any_quorum"
+      t.string :status, null: false, default: "pending"
+
+      t.datetime :satisfied_at, precision: 6
+      t.datetime :closed_at, precision: 6
+
+      t.timestamps precision: 6, null: false
+    end
+
+    add_index :change_request_stages, %i(change_request_id position), unique: true
+    add_index :change_request_stages, %i(change_request_id name), unique: true
+
+    add_check_constraint :change_request_stages, "status IN ('pending', 'satisfied', 'closed', 'rejected')", name: "change_request_stages_status_check"
+    add_check_constraint :change_request_stages, "satisfied_by IN ('any_quorum', 'all_quorums')", name: "change_request_stages_satisfied_by_check"
+    add_check_constraint :change_request_stages, "position >= 1", name: "change_request_stages_position_check"
+
+
+    create_table :change_request_quorums, id: :uuid do |t|
+      t.references :change_request_stage, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.integer :position, null: false
+      t.string :name # NULL when the stage holds only one quorum
+
+      t.integer :threshold, null: false
+      t.string :permission_match, null: false, default: "any"
+      t.string :status, null: false, default: "pending"
+      t.datetime :satisfied_at, precision: 6
+
+      t.timestamps precision: 6, null: false
+    end
+
+    add_index :change_request_quorums, %i(change_request_stage_id position), unique: true
+    add_index :change_request_quorums, %i(change_request_stage_id name), unique: true, where: "name IS NOT NULL", name: "index_change_request_quorums_on_stage_and_name"
+
+    add_check_constraint :change_request_quorums, "status IN ('pending', 'satisfied')", name: "change_request_quorums_status_check"
+    add_check_constraint :change_request_quorums, "permission_match IN ('any', 'all')", name: "change_request_quorums_permission_match_check"
+    add_check_constraint :change_request_quorums, "threshold >= 1", name: "change_request_quorums_threshold_check"
+    add_check_constraint :change_request_quorums, "position >= 1", name: "change_request_quorums_position_check"
+
+
+    create_table :change_request_quorum_permissions, id: :uuid do |t|
+      t.references :change_request_quorum, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.string :permission
+      t.string :actor_type
+    end
+
+    add_index :change_request_quorum_permissions, %i(change_request_quorum_id permission actor_type), unique: true, nulls_not_distinct: true, name: "index_change_request_quorum_permissions_unique"
+    add_index :change_request_quorum_permissions, :permission
+
+    add_check_constraint :change_request_quorum_permissions, "permission IS NOT NULL OR actor_type IS NOT NULL", name: "change_request_quorum_permissions_not_both_null_check"
+
+
+    create_table :change_request_quorum_eligible_actors, id: :uuid do |t|
+      t.references :change_request_quorum, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.string :actor_type, null: false
+      t.string :actor_id, null: false
+    end
+
+    add_index :change_request_quorum_eligible_actors, %i(change_request_quorum_id actor_type actor_id), unique: true, name: "index_change_request_quorum_eligible_actors_unique"
+    add_index :change_request_quorum_eligible_actors, %i(actor_type actor_id)
+
+
+    create_table :change_request_approvals, id: :uuid do |t|
+      t.references :change_request, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+      t.references :change_request_stage, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.string :approver_type, null: false
+      t.string :approver_id, null: false
+      t.string :approver_label, null: false
+
+      t.string :approver_identity
+
+      t.text :comment
+      t.string :decision, null: false
+      t.datetime :decided_at, precision: 6, null: false
+
+      t.timestamps precision: 6, null: false
+    end
+
+    add_index :change_request_approvals, %i(change_request_stage_id approver_type approver_id), unique: true, name: "index_change_request_approvals_unique_decision"
+
+    add_check_constraint :change_request_approvals, "decision IN ('approved', 'rejected')", name: "change_request_approvals_decision_check"
+
+
+    create_table :change_request_approval_quorums, id: :uuid do |t|
+      t.references :change_request_approval, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+      t.references :change_request_quorum, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+    end
+
+    add_index :change_request_approval_quorums, %i(change_request_approval_id change_request_quorum_id), unique: true, name: "index_change_request_approval_quorums_unique"
+
+    create_table :change_request_events, id: :uuid do |t|
+      t.references :change_request, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.string :actor_type, null: false
+      t.string :actor_id, null: false
+      t.string :actor_label, null: false
+
+      t.string :kind, null: false
+      t.string :operation_version, null: false
+
+      t.text :body
+      t.jsonb :metadata, null: false, default: {}
+
+      t.datetime :occurred_at, precision: 6, null: false
+      t.datetime :created_at, precision: 6, null: false
+    end
+
+    add_index :change_request_events, %i(change_request_id occurred_at)
+
+
+    create_table :change_request_attempts, id: :uuid do |t|
+      t.references :change_request, type: :uuid, null: false, index: true, foreign_key: { on_delete: :cascade }
+
+      t.integer :number, null: false
+
+      t.string :executer_type
+      t.string :executer_id
+      t.string :executer_label
+
+      t.datetime :started_at, precision: 6
+      t.datetime :finished_at, precision: 6
+
+      t.string :outcome
+
+      t.string :error_class
+      t.text :error_message
+      t.text :backtrace
+
+      t.timestamps precision: 6, null: false
+    end
+
+    add_index :change_request_attempts, %i(change_request_id number), unique: true
+
+    add_check_constraint :change_request_attempts, "outcome IS NULL OR outcome IN ('succeeded', 'failed', 'abandoned')", name: "change_request_attempts_outcome_check"
+    add_check_constraint :change_request_attempts, "number >= 1", name: "change_request_attempts_number_check"
+  end
+end
