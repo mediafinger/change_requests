@@ -203,21 +203,21 @@ version.
 
 **Nouns are records, verbs are commands.** `Approval` is a row; `Approve` is a thing you do.
 
-| Concept                    | Constant                                          |
-|----------------------------|---------------------------------------------------|
-| The request record         | `ChangeRequests::Request`                         |
-| A step                     | `ChangeRequests::Stage`                           |
-| A counting rule in a step  | `ChangeRequests::Quorum`                          |
-| Eligibility by permission  | `ChangeRequests::QuorumPermission`                |
-| Eligibility by name        | `ChangeRequests::QuorumEligibleActor`             |
-| An approval record         | `ChangeRequests::Approval`                        |
+| Concept                      | Constant                                        |
+|------------------------------|-------------------------------------------------|
+| The request record           | `ChangeRequests::Request`                       |
+| A step                       | `ChangeRequests::Stage`                         |
+| A counting rule in a step    | `ChangeRequests::Quorum`                        |
+| Eligibility by permission    | `ChangeRequests::QuorumPermission`              |
+| Eligibility by name          | `ChangeRequests::QuorumEligibleActor`           |
+| An approval record           | `ChangeRequests::Approval`                      |
 | What an approval counted for | `ChangeRequests::ApprovalQuorum`                |
-| An audit row               | `ChangeRequests::Event`                           |
-| An execution attempt       | `ChangeRequests::Attempt`                         |
-| A transition               | `ChangeRequests::Commands::{Approve,Execute,…}`   |
-| Command base               | `ChangeRequests::Commands::Base`                  |
-| Workflow evaluation        | `ChangeRequests::Commands::EvaluateWorkflow`      |
-| Base error                 | `ChangeRequests::Error` (+ taxonomy, §7)          |
+| An audit row                 | `ChangeRequests::Event`                         |
+| An execution attempt         | `ChangeRequests::Attempt`                       |
+| A transition                 | `ChangeRequests::Commands::{Approve,Execute,…}` |
+| Command base                 | `ChangeRequests::Commands::Base`                |
+| Workflow evaluation          | `ChangeRequests::Commands::EvaluateWorkflow`    |
+| Base error                   | `ChangeRequests::Error` (+ taxonomy, §7)        |
 
 **Gateable things are operations.** The host-facing surface is
 `ChangeRequests.operations.define "…" do |op|` - flat calls, no wrapper block, so declarations split across
@@ -364,7 +364,7 @@ Keep the axes distinct: permission and eligible-actor rows decide **who may** ap
 
 | `change_request_quorum_permissions` | Type         | Notes                                        |
 |-------------------------------------|--------------|----------------------------------------------|
-| `change_request_quorum_id`    | FK, not null |                                              |
+| `change_request_quorum_id`          | FK, not null |                                              |
 | `permission`                        | string, null | `NULL` = any permission (gate on type alone) |
 | `actor_type`                        | string, null | `NULL` = any registered actor type           |
 
@@ -373,7 +373,7 @@ wildcard.
 
 | `change_request_quorum_eligible_actors` | Type             |
 |-----------------------------------------|------------------|
-| `change_request_quorum_id`        | FK, not null     |
+| `change_request_quorum_id`              | FK, not null     |
 | `actor_type`                            | string, not null |
 | `actor_id`                              | string, not null |
 
@@ -398,10 +398,10 @@ the default.
 
 #### `change_request_approval_quorums` - which quorums an approval counted toward
 
-| Column                           | Type         |
-|----------------------------------|--------------|
-| `change_request_approval_id`     | FK, not null |
-| `change_request_quorum_id` | FK, not null |
+| Column                       | Type         |
+|------------------------------|--------------|
+| `change_request_approval_id` | FK, not null |
+| `change_request_quorum_id`   | FK, not null |
 
 Write-once, evaluated **at decision time**, unique on the pair. Two reasons it exists rather than re-deriving eligibility when counting:
 
@@ -507,7 +507,7 @@ request is authoritative.
 | `id`                | uuid/bigint                   |                                                            |
 | `change_request_id` | FK, not null                  |                                                            |
 | `actor_type`        | string, not null              | `"System"` for gem-originated events - see below           |
-| `actor_id`          | string, not null              | `"0"` for the system actor                                 |
+| `actor_id`          | string, not null              | `"system"` for the system actor - never a host id          |
 | `actor_label`       | string, not null              | snapshot; `"System"` for gem-originated events             |
 | `kind`              | string, not null              | inclusion validation, **no CHECK** - see below             |
 | `operation_version` | string, not null              | the version in effect when this event occurred - see below |
@@ -525,9 +525,10 @@ benefit, since nothing but the gem ever writes this table.
 
 **The system actor is a sentinel, not a NULL.** Gem-originated events (expiry, the reaper, undeclared-
 operation cancellation, cooldown stage closing) are written with
-`actor_type: "System", actor_id: "0", actor_label: "System"` - `ChangeRequests::SYSTEM_ACTOR`. It is exempt
-from the registered-type allowlist, and the columns are `not null`, so "who did this" is answerable for
-every row and no presenter or export has to branch on nil.
+`actor_type: "System", actor_id: "system", actor_label: "System"` - `ChangeRequests::SYSTEM_ACTOR`. It is
+exempt from the registered-type allowlist, and the columns are `not null`, so "who did this" is answerable
+for every row and no presenter or export has to branch on nil.
+
 
 `stage_satisfied` carries `metadata: { quorum: "admin" }` when the stage has named quorums, so a stage met
 through a one-admin shortcut is distinguishable in the timeline from one met the long way; the key is
@@ -595,10 +596,10 @@ Two requirements drive this:
 
 So every reference to a host record is a **triple**:
 
-| Concern         | Column    | Notes                                                     |
-|-----------------|-----------|-----------------------------------------------------------|
-| Which class     | `*_type`  | string, validated against the configured allowlist (§10)  |
-| Which record    | `*_id`    | **string**                                                |
+| Concern         | Column    | Notes                                                           |
+|-----------------|-----------|-----------------------------------------------------------------|
+| Which class     | `*_type`  | string, validated against the configured allowlist (§10)        |
+| Which record    | `*_id`    | **string**                                                      |
 | What to display | `*_label` | captured at write time, readonly after create, never recomputed |
 
 Applied to `requester`, `executer`, `approver`, event `actor`, attempt `executer` and `tenant`.
@@ -2185,26 +2186,26 @@ milestones are split into parts that can be picked up separately. **Spec** names
 the work; a part with no gap listed in §17.1 is ready to be broken into tickets from those sections alone.
 Estimates assume one experienced developer working from this plan.
 
-| #       | Version   | Scope                                                                                                                                                                        | Spec        | Effort |
-|---------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
-| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **Not started**: only `bundle gem` output and `rake ci` exist | §1, §2, §15 | 5 d    |
-| **M1a** |           | Migrations for all nine tables, **written as the install-generator template**, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability  | §4, §5      | 7 d    |
-| **M1b** | 0.2.0     | Guards for the whole §7.2 table, and commands for all of it **except `Execute`**; a minimal `Operations`/`Operation` pulled forward from M2; `with_lock`; sequential multi-stage, single-quorum evaluation; error taxonomy | §7 | 11 d   |
-| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL, `op.cooldown`, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry, `op.approvals` and materialise-on-create land early, in M1b | §6.4, §6.12 | 2–3 d  |
-| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, the §8.1 override branch. **Concurrency specs.** `Guards::Execute` lands in M1b | §8, §15.3   | 3 d    |
-| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                           | §8, §5.11   | 2 d    |
-| **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor` | §9          | 2–3 d  |
-| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                               | §11         | 3 d    |
-| **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination                                         | §12 Tier 1  | 3 d    |
-| **M6b** |           | Show page: stage/quorum progress, payload preview and expander, timeline, action buttons, override form                                                                      | §12 Tier 3  | 2–3 d  |
-| **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                | §12 Tier 2  | 2–3 d  |
-| **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                            | §13         | 4 d    |
-| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                | §14         | 3–4 d  |
-| **M9a** |           | Multi-quorum evaluation: `all_quorums`, one-quorum-per-approval linking, named approvers. `any_quorum`, sequential stage advance and stage closing land in M1b               | §7.1        | 2–3 d  |
-| **M9b** |           | `op.cooldown`: `CloseStageJob`, unapproval inside the window, `close_due_stages!` fallback                                                                                   | §7.1        | 1–2 d  |
-| **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                             | §5.3, §11   | 2 d    |
-| **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                              | §10         | 2–3 d  |
-| **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                          | -           | 4–5 d  |
+| #       | Version   | Scope                                                                                                                                                                                                                      | Spec        | Effort |
+|---------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
+| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **Not started**: only `bundle gem` output and `rake ci` exist                         | §1, §2, §15 | 5 d    |
+| **M1a** |           | Migrations for all nine tables, **written as the install-generator template**, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability                                                | §4, §5      | 7 d    |
+| **M1b** | 0.2.0     | Guards for the whole §7.2 table, and commands for all of it **except `Execute`**; a minimal `Operations`/`Operation` pulled forward from M2; `with_lock`; sequential multi-stage, single-quorum evaluation; error taxonomy | §7          | 11 d   |
+| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL, `op.cooldown`, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry, `op.approvals` and materialise-on-create land early, in M1b               | §6.4, §6.12 | 2–3 d  |
+| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, the §8.1 override branch. **Concurrency specs.** `Guards::Execute` lands in M1b                                   | §8, §15.3   | 3 d    |
+| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                                                                         | §8, §5.11   | 2 d    |
+| **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`                                               | §9          | 2–3 d  |
+| **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                                                                             | §11         | 3 d    |
+| **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination                                                                                       | §12 Tier 1  | 3 d    |
+| **M6b** |           | Show page: stage/quorum progress, payload preview and expander, timeline, action buttons, override form                                                                                                                    | §12 Tier 3  | 2–3 d  |
+| **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                                                              | §12 Tier 2  | 2–3 d  |
+| **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                          | §13         | 4 d    |
+| **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                                                              | §14         | 3–4 d  |
+| **M9a** |           | Multi-quorum evaluation: `all_quorums`, one-quorum-per-approval linking, named approvers. `any_quorum`, sequential stage advance and stage closing land in M1b                                                             | §7.1        | 2–3 d  |
+| **M9b** |           | `op.cooldown`: `CloseStageJob`, unapproval inside the window, `close_due_stages!` fallback                                                                                                                                 | §7.1        | 1–2 d  |
+| **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                                                                           | §5.3, §11   | 2 d    |
+| **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                                                                            | §10         | 2–3 d  |
+| **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                                                                        | -           | 4–5 d  |
 
 **Total: roughly 10-12 focused weeks**, or 5-6 months at one day a week.
 M0 through M1b alone is ~23 days: M1 carries the schema, which is the work that is cheapest to do once and
@@ -2223,7 +2224,7 @@ sections. These six are not, and each needs a decision rather than more prose:
 | Part    | What is missing                                                                                                                                            |
 |---------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **M2**  | What `verify!` prints when it fails - one line per problem, or one raised error listing all of them.                                                       |
-| **M5**  | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                                                         |
+| **M5**  | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                   |
 | **M6b** | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.               |
 | **M7**  | `scaffold_ui` output is one line. Which files, in which namespace, with which route helpers and layout assumptions.                                        |
 | **M10** | The object handed to `config.on_event` is unspecified - the `Event` record, a value object, or a payload hash, and which associations are preloaded on it. |
@@ -2272,7 +2273,8 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
 13. **No `idempotency_key` column.** The request's own id is handed to targets that declare a
     `change_request_id:` keyword, and the `executing` claim is what prevents double execution (§8).
 14. **`Comment` is exempt from the undeclared-operation refusal** (§5.11), and `Cancel` requires a reason.
-15. **Events carry a `System` sentinel actor**, never a NULL: `type "System"`, `id "0"`, `label "System"`.
+15. **Events carry a `System` sentinel actor**, never a NULL: `type "System"`, `id "system"`,
+    `label "System"`.
 16. **`kind` is a validation, not a CHECK constraint.** Later milestones add kinds; a CHECK would make each
     one a migration in every host application.
 
