@@ -7,6 +7,14 @@ require "active_record/railtie"
 # works inside a real Rails application with only ActiveRecord loaded.
 require "change_requests"
 
+# A normal Rails host never writes this line: `config/application.rb` loads Rails before
+# `Bundler.require` reaches the gem, so requiring it loads the engine on its own.
+#
+# This application is not a normal host. `spec_helper` requires the gem first, before anything has
+# loaded Rails, and `require` only decides once - so without this the dummy app boots with no engine
+# at all, and `isolate_namespace`, the boot-time `validate!` and the route set are all inert.
+ChangeRequests.load_engine!
+
 module Dummy
   # The host application the gem's specs run against (§15.1).
   #

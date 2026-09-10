@@ -19,6 +19,12 @@ RSpec:
     - spec/dummy/**/*
     - spec/integration/headless_script.rb
 
+Naming/PredicateMethod:
+  # `load_engine!` acts and reports whether it acted, like `save!`. The bang is the point; a `?` name
+  # would promise a question that does nothing.
+  AllowedMethods:
+    - load_engine!
+
 Naming/FileName:
   Exclude:
     - Archspec.rb # named by the tool that reads it, like Gemfile and Rakefile
