@@ -19,8 +19,19 @@ RSpec.describe ChangeRequests::Event do
   end
 
   describe "kind" do
-    it "lists §5.5's sixteen" do
-      expect(described_class::KINDS.size).to eq(16)
+    # The list itself, not its size: a count-only assertion is what let `stage_closed` sit here
+    # declared and unemitted while PLAN.md §7.1 and the M1 plan disagreed about it (Q41).
+    let(:documented) do
+      %w(
+        requested approved unapproved rejected commented canceled
+        quorum_satisfied stage_satisfied overridden
+        execution_started executed execution_failed
+        expired reaped operation_undeclared
+      )
+    end
+
+    it "lists §5.5's kinds, exactly" do
+      expect(described_class::KINDS).to eq(documented)
     end
 
     it "rejects one that is not listed" do
