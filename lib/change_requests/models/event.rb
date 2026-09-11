@@ -41,6 +41,8 @@ module ChangeRequests
 
     # Expiry, the reaper and undeclared-operation cancellation have no actor. The sentinel keeps the
     # triple not-null so no presenter or export branches on nil.
-    def system_actor? = actor_type == SYSTEM_ACTOR[:type]
+    def system_actor?
+      actor_type == SYSTEM_ACTOR[:type]
+    end
   end
 end

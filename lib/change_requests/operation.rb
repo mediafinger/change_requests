@@ -25,11 +25,15 @@ module ChangeRequests
       @workflow       = Workflow.new
     end
 
-    def method_name = @method_name&.to_sym
+    def method_name
+      @method_name&.to_sym
+    end
 
     # The two defaults below resolve lazily: initializer order is the host's, and an operations file
     # that loads before the configuration file should still see the host's defaults.
-    def max_attempts = @max_attempts || ChangeRequests.config.default_max_attempts
+    def max_attempts
+      @max_attempts || ChangeRequests.config.default_max_attempts
+    end
 
     def expires_in
       return @expires_in if @expires_in_set

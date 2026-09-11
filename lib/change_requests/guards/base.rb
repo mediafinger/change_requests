@@ -46,7 +46,9 @@ module ChangeRequests
       class << self
         # Declared, never derived from the guard's name: Create, Comment and Expire refuse with
         # NotAuthorized, the rest with their own TransitionError.
-        def refuses_with(error_class) = self.declared_error_class = error_class
+        def refuses_with(error_class)
+          self.declared_error_class = error_class
+        end
 
         def error_class
           declared_error_class ||
@@ -55,7 +57,9 @@ module ChangeRequests
 
         # Comment only. A request stranded by a removed declaration is exactly the one someone needs
         # to leave a note on, and a comment writes no lifecycle state (§5.11, I8).
-        def exempt_from_undeclared_operation! = self.exempt_from_undeclared_operation = true
+        def exempt_from_undeclared_operation!
+          self.exempt_from_undeclared_operation = true
+        end
       end
 
       def initialize(request:, actor:, **options)
@@ -64,7 +68,9 @@ module ChangeRequests
         @options = options
       end
 
-      def allowed? = reason.nil?
+      def allowed?
+        reason.nil?
+      end
 
       def reason
         return :operation_undeclared if operation.nil? && !self.class.exempt_from_undeclared_operation
@@ -79,19 +85,29 @@ module ChangeRequests
       end
 
       # Subclasses override. nil permits.
-      def refusal = nil
+      def refusal
+        nil
+      end
 
-      def config = ChangeRequests.config
+      def config
+        ChangeRequests.config
+      end
 
       # Resolved live, never from the columns on the row: those are audit data, and a request whose
       # operation is no longer declared can never run (§6.12).
-      def operation = ChangeRequests.operations[request.operation_key]
+      def operation
+        ChangeRequests.operations[request.operation_key]
+      end
 
-      def stage = request.current_stage
+      def stage
+        request.current_stage
+      end
 
       # The acting actor as the columns store them. Raises UnknownActorType for an unregistered
       # class, which is the allowlist doing its job (§9.1).
-      def actor_ref = @actor_ref ||= ChangeRequests.actor_attributes(actor)
+      def actor_ref
+        @actor_ref ||= ChangeRequests.actor_attributes(actor)
+      end
 
       # Is this the same human twice? `(type, id)` is airtight within one actor class and blind
       # across them, which `config.actor_identity` is the opt-in fix for (§9.4). Either side may be

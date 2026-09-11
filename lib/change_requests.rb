@@ -19,13 +19,19 @@ module ChangeRequests
     # `unless mod.respond_to?(:table_name_prefix)`, and its version yields `change_requests_stages`.
     # `Request` is the one model that overrides its table name; it would derive
     # `change_request_requests`.
-    def table_name_prefix = "change_request_"
+    def table_name_prefix
+      "change_request_"
+    end
 
-    def config = @config ||= Configuration.new
+    def config
+      @config ||= Configuration.new
+    end
 
     # The declaration registry (§6.12). Memoised for the same reason as config: initializers
     # accumulate into it.
-    def operations = @operations ||= Operations.new
+    def operations
+      @operations ||= Operations.new
+    end
 
     # The (type, id, label) triple for a host record, with the label snapshotted through the
     # registered lambda. Raises before anything is constantized: the registry is the allowlist, and

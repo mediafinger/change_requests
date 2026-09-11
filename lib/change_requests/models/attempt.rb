@@ -34,7 +34,9 @@ module ChangeRequests
       define_method(:"#{value}?") { outcome == value }
     end
 
-    def finished? = outcome.present?
+    def finished?
+      outcome.present?
+    end
 
     # What the retry ceiling counts against `max_attempts` (§8).
     def self.next_number_for(change_request)

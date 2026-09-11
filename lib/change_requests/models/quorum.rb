@@ -47,8 +47,13 @@ module ChangeRequests
     validates :name, format: { with: NAME_FORMAT }, allow_nil: true
     validates :name, uniqueness: { scope: :change_request_stage_id }, allow_nil: true
 
-    def any_match? = permission_match == "any"
-    def all_match? = permission_match == "all"
+    def any_match?
+      permission_match == "any"
+    end
+
+    def all_match?
+      permission_match == "all"
+    end
 
     # A nameless quorum has no display text of its own; the stage's label is the honest answer.
     def label

@@ -83,6 +83,10 @@ Style/Documentation:
 Style/DoubleNegation:
   Enabled: true
 
+Style/EndlessMethod:
+  Enabled: true
+  EnforcedStyle: disallow
+
 Style/FrozenStringLiteralComment:
   Enabled: true
 

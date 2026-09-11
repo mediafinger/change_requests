@@ -391,7 +391,9 @@ RSpec.describe "the generated schema" do
     connection.select_one("SELECT * FROM change_requests WHERE id = #{connection.quote(id)}")
   end
 
-  def create_request = insert_request
+  def create_request
+    insert_request
+  end
 
   def insert_stage(**overrides)
     attributes = {
@@ -402,7 +404,9 @@ RSpec.describe "the generated schema" do
     insert("change_request_stages", attributes)
   end
 
-  def create_quorum = insert_quorum_row
+  def create_quorum
+    insert_quorum_row
+  end
 
   def insert_quorum_row(**overrides)
     attributes = {

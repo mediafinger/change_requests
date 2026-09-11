@@ -60,7 +60,9 @@ module ChangeRequests
       super(message || translated_message)
     end
 
-    def i18n_key = "#{I18N_SCOPE}.#{reason || self.class.error_key}"
+    def i18n_key
+      "#{I18N_SCOPE}.#{reason || self.class.error_key}"
+    end
 
     # NotApprovable => "not_approvable". Used when a caller raised without a reason.
     def self.error_key

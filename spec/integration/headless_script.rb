@@ -21,7 +21,9 @@ CONNECTION = {
   password: ENV.fetch("PGPASSWORD", nil),
 }.freeze
 
-def report(key, value) = puts("#{key}=#{value}")
+def report(key, value)
+  puts("#{key}=#{value}")
+end
 
 # Everything below is worthless if something dragged Rails in, so say so first and loudly.
 report :rails, defined?(Rails) ? "loaded" : "absent"

@@ -25,11 +25,21 @@ module ChangeRequests
 
     # nil, not a raise: every guard asks whether the declaration is still live, and §5.11 makes
     # that a refusal the guard words itself.
-    def [](key) = @operations[key.to_s]
+    def [](key)
+      @operations[key.to_s]
+    end
 
-    def keys = @operations.keys
-    def each(&) = @operations.each_value(&)
-    def clear = @operations.clear
+    def keys
+      @operations.keys
+    end
+
+    def each(&)
+      @operations.each_value(&)
+    end
+
+    def clear
+      @operations.clear
+    end
 
     private
 

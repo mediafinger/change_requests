@@ -18,7 +18,9 @@ module GuardProbes
   class Fussy < ChangeRequests::Guards::Base
     refuses_with ChangeRequests::NotApprovable
 
-    def refusal = request.pending? ? nil : :not_pending
+    def refusal
+      request.pending? ? nil : :not_pending
+    end
   end
 
   class Undeclared < ChangeRequests::Guards::Base; end

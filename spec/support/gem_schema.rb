@@ -21,11 +21,17 @@ module GemSchema
     migrate!
   end
 
-  def migrate! = context.migrate
+  def migrate!
+    context.migrate
+  end
 
-  def rollback! = context.migrate(0)
+  def rollback!
+    context.migrate(0)
+  end
 
-  def context = ActiveRecord::MigrationContext.new(migration_path)
+  def context
+    ActiveRecord::MigrationContext.new(migration_path)
+  end
 
   def tables
     ActiveRecord::Base.connection.tables.grep(/\Achange_request/).sort

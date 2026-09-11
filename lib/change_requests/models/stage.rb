@@ -35,11 +35,18 @@ module ChangeRequests
                      format: { with: NAME_FORMAT },
                      uniqueness: { scope: :change_request_id }
 
-    def any_quorum? = satisfied_by == "any_quorum"
-    def all_quorums? = satisfied_by == "all_quorums"
+    def any_quorum?
+      satisfied_by == "any_quorum"
+    end
+
+    def all_quorums?
+      satisfied_by == "all_quorums"
+    end
 
     # Still accepting decisions. A closed stage is immutable and a rejected one stopped the request.
-    def open? = pending? || satisfied?
+    def open?
+      pending? || satisfied?
+    end
 
     # Display text, resolved separately from the identifier (§5.9).
     def label

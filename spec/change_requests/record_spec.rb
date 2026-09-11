@@ -62,14 +62,22 @@ RSpec.describe ChangeRequests::Record do
     end
 
     it "derives a name from the prefix with no configuration at all" do
-      model = Class.new(described_class) { def self.name = "ChangeRequests::Stage" }
+      model = Class.new(described_class) do
+        def self.name
+          "ChangeRequests::Stage"
+        end
+      end
 
       expect(model.table_name).to eq("change_request_stages")
     end
 
     # The one name the convention gets wrong, and the reason Request is allowed its exception.
     it "would derive change_request_requests for Request, which is why Request sets its own" do
-      model = Class.new(described_class) { def self.name = "ChangeRequests::Request" }
+      model = Class.new(described_class) do
+        def self.name
+          "ChangeRequests::Request"
+        end
+      end
 
       expect(model.table_name).to eq("change_request_requests")
     end

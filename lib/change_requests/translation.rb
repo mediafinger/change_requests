@@ -15,6 +15,8 @@ module ChangeRequests
       I18n.translate(key, default: default)
     end
 
-    def available? = defined?(I18n) ? true : false
+    def available?
+      defined?(I18n) ? true : false
+    end
   end
 end

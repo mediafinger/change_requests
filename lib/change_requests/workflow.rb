@@ -14,6 +14,8 @@ module ChangeRequests
       @stages = stages
     end
 
-    def empty? = stages.empty?
+    def empty?
+      stages.empty?
+    end
   end
 end
