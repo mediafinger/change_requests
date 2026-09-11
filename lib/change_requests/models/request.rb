@@ -56,5 +56,14 @@ module ChangeRequests
     def current_stage
       stages.find_by(position: current_stage_position)
     end
+
+    # The attempts rows *are* the count; there is no counter column (§19.12). `max_attempts` is
+    # readonly after create and `>= 1` by CHECK, so there is no zero case to defend against.
+    #
+    # It answers "is there an attempt left", not "may this be executed" - Guards::Execute combines
+    # it with the status, and M3a's Commands::Execute and M3b's reaper both read it.
+    def retryable?
+      attempts.count < max_attempts
+    end
   end
 end
