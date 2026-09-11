@@ -57,11 +57,19 @@ RSpec.describe ChangeRequests::Guards::Reject do
   end
 
   describe ":not_pending" do
-    %w(approved executing successful failed rejected canceled expired).each do |status|
+    %w(approved executing failed).each do |status|
       it "refuses a request that is #{status}" do
         change_request.update!(status: status)
 
         expect(guard.reason).to eq(:not_pending)
+      end
+    end
+
+    ChangeRequests::Request::FINAL_STATUSES.each do |status|
+      it "refuses a request that is already #{status} with the shared reason (Q48)" do
+        change_request.update!(status: status)
+
+        expect(guard.reason).to eq(:already_finalized)
       end
     end
   end
