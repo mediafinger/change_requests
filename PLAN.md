@@ -279,6 +279,7 @@ stage. This avoids a painful schema migration later, and costs one extra table n
 | `requester_type`            | string, not null                      | `"User"`, `"Admin"`, … - allowlisted, see §5.7                 |
 | `requester_id`              | **string**, not null                  | string so heterogeneous PK types can share the column          |
 | `requester_label`           | string, not null                      | snapshot at creation; outlives the actor record                |
+| `requester_identity`        | string, null                          | `config.actor_identity` snapshot, if set - see §9.4            |
 | `executer_type`             | string, null                          |                                                                |
 | `executer_id`               | string, null                          |                                                                |
 | `executer_label`            | string, null                          | snapshot at execution                                          |
@@ -301,7 +302,7 @@ where not null - overrides are the rows a compliance review asks for first.
 
 Creation-time facts are immutable rather than merely conventionally so: `operation_key`,
 `operation_version`, `service`, `method_name`, `payload`, `payload_labels`, `requester_type`, `requester_id`,
-`requester_label`, `tenant_type`, `tenant_id`, `max_attempts`.
+`requester_label`, `requester_identity`, `tenant_type`, `tenant_id`, `max_attempts`.
 
 **Enforced by an own `before_update` guard that raises `ChangeRequests::ReadonlyAttribute`, not by
 `attr_readonly`.** Rails' `attr_readonly` silently discards the assignment unless the *host application*
@@ -1589,8 +1590,11 @@ Both matching semantics ship, but as a **per-quorum** setting rather than an app
    config.actor_identity = ->(actor) { actor.person_id }   # or email, or the SSO subject
    ```
 
-   The result is snapshotted onto each approval as `approver_identity` (§5.4) and, when configured, used in
-   place of `(type, id)` when counting distinct approvers **and** by the requester-cannot-approve rule.
+   The result is snapshotted onto each approval as `approver_identity` (§5.4) and onto the request as
+   `requester_identity` (§5.1) - the requester's is what the requester-cannot-approve rule compares against,
+   and without it that rule would fall back to `(type, id)` and stay blind across classes. When configured,
+   the identity is used in place of `(type, id)` when counting distinct approvers **and** by the
+   requester-cannot-approve rule.
    That second
    use is the important one: without it, requesting as `User#99` and approving as `Admin#7` defeats
    four-eyes silently, which is a worse failure than a miscounted quorum because it is the gem's central
