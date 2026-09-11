@@ -12,7 +12,9 @@ module ChangeRequests
     attr_accessor :actor_label_strategy, :actor_identity
 
     # Authorization (§9.2)
-    attr_accessor :authorization, :default_permission_match
+    attr_reader :authorization
+    # The default only; every quorum carries its own (§5.3).
+    attr_accessor :default_permission_match
 
     # Separation of duties (§8, §8.1)
     attr_accessor :approver_may_execute, :requester_may_execute, :requester_may_override
@@ -37,6 +39,16 @@ module ChangeRequests
       @only_record_rejections = false
       @default_max_attempts   = 1
       @default_expires_in     = nil
+    end
+
+    # §9.2 tells hosts to assign a bare lambda; the gem needs one object answering `allows?`.
+    def authorization=(policy)
+      @authorization =
+        if policy.respond_to?(:allows?) || !policy.respond_to?(:call)
+          policy # validate! reports anything that answers neither
+        else
+          Authorization::Callable.new(policy)
+        end
     end
 
     # Reopens an existing registration rather than replacing it: two initializers may each
@@ -64,6 +76,7 @@ module ChangeRequests
         label_strategy_problem,
         permission_match_problem,
         actor_identity_problem,
+        authorization_problem,
         max_attempts_problem,
         *actor_types.values.flat_map(&:problems),
         *tenant_types.values.flat_map(&:problems),
@@ -115,6 +128,14 @@ module ChangeRequests
 
       "config.actor_identity is #{actor_identity.inspect}. Expected nil, or something callable " \
         "such as `->(actor) { actor.person_id }` (§9.4)."
+    end
+
+    def authorization_problem
+      return if authorization.respond_to?(:allows?)
+
+      "config.authorization is #{authorization.inspect}. Expected " \
+        "ChangeRequests::Authorization::Permissions.new, another object answering " \
+        "`allows?(actor:, quorum:)`, or a lambda taking (actor:, request:, stage:, action:) (§9.2)."
     end
 
     def max_attempts_problem
