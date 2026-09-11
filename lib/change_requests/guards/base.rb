@@ -1,0 +1,125 @@
+# frozen_string_literal: true
+
+module ChangeRequests
+  module Guards
+    # One guard object, consulted by both the command and the presenter, so a disabled button and a
+    # raised error cannot disagree about why something is refused (§7).
+    #
+    #   class Approve < Base
+    #     refuses_with NotApprovable
+    #
+    #     def refusal
+    #       return :not_pending unless request.pending?
+    #       ...
+    #     end
+    #   end
+    #
+    # Subclasses implement `refusal` and return nil when they permit the transition. The
+    # undeclared-operation check runs first, here, so no guard has to repeat it (§5.11).
+    class Base
+      # The shared vocabulary. `reason` is the contract - controllers branch on these symbols and
+      # views render them as a disabled button's tooltip - so a guard picks one from this list
+      # rather than inventing wording. M1b-13 translates every entry.
+      REASONS = %i(
+        operation_undeclared
+        not_pending
+        requester
+        stage_not_current
+        stage_not_open
+        already_decided
+        not_the_approver
+        not_permitted
+        finalized
+        reason_required
+        may_not_request
+        not_approved
+        attempts_exhausted
+        not_expired
+        not_system
+      ).freeze
+
+      attr_reader :request, :actor, :options
+
+      class_attribute :declared_error_class, instance_accessor: false
+      class_attribute :exempt_from_undeclared_operation, instance_accessor: false, default: false
+
+      class << self
+        # Declared, never derived from the guard's name: Create, Comment and Expire refuse with
+        # NotAuthorized, the rest with their own TransitionError.
+        def refuses_with(error_class) = self.declared_error_class = error_class
+
+        def error_class
+          declared_error_class ||
+            fail(ConfigurationError, "#{name} must declare `refuses_with <error class>` (§7)")
+        end
+
+        # Comment only. A request stranded by a removed declaration is exactly the one someone needs
+        # to leave a note on, and a comment writes no lifecycle state (§5.11, I8).
+        def exempt_from_undeclared_operation! = self.exempt_from_undeclared_operation = true
+      end
+
+      def initialize(request:, actor:, **options)
+        @request = request
+        @actor   = actor
+        @options = options
+      end
+
+      def allowed? = reason.nil?
+
+      def reason
+        return :operation_undeclared if operation.nil? && !self.class.exempt_from_undeclared_operation
+
+        refusal
+      end
+
+      def check!
+        return request if allowed?
+
+        fail self.class.error_class.new(request: request, reason: reason)
+      end
+
+      # Subclasses override. nil permits.
+      def refusal = nil
+
+      def config = ChangeRequests.config
+
+      # Resolved live, never from the columns on the row: those are audit data, and a request whose
+      # operation is no longer declared can never run (§6.12).
+      def operation = ChangeRequests.operations[request.operation_key]
+
+      def stage = request.current_stage
+
+      # The acting actor as the columns store them. Raises UnknownActorType for an unregistered
+      # class, which is the allowlist doing its job (§9.1).
+      def actor_ref = @actor_ref ||= ChangeRequests.actor_attributes(actor)
+
+      # Is this the same human twice? `(type, id)` is airtight within one actor class and blind
+      # across them, which `config.actor_identity` is the opt-in fix for (§9.4). Either side may be
+      # a live actor object or a stored reference triple.
+      def same_person?(one, other)
+        return false if one.nil? || other.nil?
+
+        left  = identity_of(one)
+        right = identity_of(other)
+
+        return left == right if left && right
+
+        reference_of(one) == reference_of(other)
+      end
+
+      private
+
+      def identity_of(subject)
+        return subject[:identity] if subject.is_a?(Hash)
+
+        config.actor_identity&.call(subject)
+      end
+
+      def reference_of(subject)
+        return subject.slice(:type, :id) if subject.is_a?(Hash)
+
+        ChangeRequests.actor_attributes(subject).slice(:type, :id)
+      end
+    end
+  end
+end
