@@ -8,8 +8,9 @@ module ChangeRequests
     #   string_enum :status, %w(pending satisfied closed)
     #   Stage.statuses #=> [...]   Stage.pending #=> scope   stage.pending? #=> true
     #
-    # Not Rails' enum: it owns the reader and writer, maps through a hash, and raises at assignment
-    # instead of reporting a validation error.
+    # Not Rails' enum: no generated writer, no mapping hash, no dangerous-name collision check, and
+    # no class-level constant. An out-of-range value is assigned as given and reported by the
+    # inclusion validation; the CHECK constraint is the floor beneath that.
     module StringEnum
       extend ActiveSupport::Concern
 

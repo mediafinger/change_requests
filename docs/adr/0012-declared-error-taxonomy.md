@@ -17,10 +17,16 @@ controller, with finer branches for the cases they handle specially. That code d
 Everything descends from `ChangeRequests::Error`; refused transitions descend from
 `TransitionError`, execution failures from `ExecutionError`.
 
-`TransitionError` carries `#request` and `#reason`. **`reason` is the contract** — controllers branch
+Every refusal carries `#request` and `#reason`. **`reason` is the contract** — controllers branch
 on it and views render it as a disabled button's tooltip — while the message is for humans and is
 translated through the same key the guard uses, so a disabled button and a raised error cannot word
 the same refusal differently.
+
+That pair lives in a `Refusal` **module**, included by `TransitionError` *and* by `NotAuthorized`. A
+shared base class would have made `NotAuthorized` a member of the transition family, and it is
+deliberately a sibling: "the actor may never do this" is a different answer from "not yet", and hosts
+rescue them apart. A guard raises whichever class it declared
+([ADR-0015](0015-one-guard-object-per-transition.md)) and the host branches on `#reason` either way.
 
 Errors raised for unsupported operations rather than refused domain transitions stay in ActiveRecord's
 taxonomy; see [ADR-0007](0007-append-only-audit-trail.md).
