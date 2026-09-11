@@ -10,6 +10,10 @@ module ChangeRequests
       refuses_with NotUnapprovable
 
       def refusal
+        # A finished request is the same refusal whichever command met it, and Q29 maps this one
+        # reason to AlreadyFinalized for every guard. `:not_pending` then means what it says:
+        # open, but not open for decisions (Q48).
+        return :already_finalized if request.final?
         return :not_pending unless request.pending?
         return :not_the_approver if decision.nil?
         return :stage_not_open unless decision.stage.pending?

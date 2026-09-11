@@ -68,13 +68,20 @@ report :json, JSON::VERSION
 GemSchema.migrate!
 report :tables, GemSchema.tables.size
 
-requester = HeadlessActor.new("act-1", "Ada Lovelace", %w(owner))
+# The registry a host declares in an initializer. No Rails, no `to_prepare`, no reloading.
+ChangeRequests.operations.define "members.update_roles" do |op|
+  op.version = "2026-09-11"
+  op.service = "Members::UpdateRoles"
+  op.approvals permissions: %w(owner), required: 2
+end
 
-request = ChangeRequests::Request.create!(
+requester = HeadlessActor.new("act-1", "Ada Lovelace", %w(editor))
+first     = HeadlessActor.new("act-2", "Grace Hopper", %w(owner))
+second    = HeadlessActor.new("act-3", "Edith Clarke", %w(owner))
+
+# The command layer, not hand-built rows: the workflow is materialised from the declaration.
+request = ChangeRequests::Commands::Create.call(
   operation_key: "members.update_roles",
-  service: "Members::UpdateRoles",
-  method_name: "call",
-  operation_version: "2026-09-11",
   requester: requester,
   payload: { "member_id" => 7, "roles" => %w(editor) }
 )
@@ -83,22 +90,35 @@ report :request, request.status
 report :requester_label, request.requester_label
 report :payload_roundtrip, request.reload.payload.fetch("roles").first
 
-stage = request.stages.create!(position: 1, name: "operational")
-quorum = stage.quorums.create!(position: 1, threshold: 2, name: "owners")
-quorum.permissions.create!(permission: "owner")
+stage = request.stages.sole
+quorum = stage.quorums.sole
 
+report :materialised, "stages=#{request.stages.count} quorums=#{stage.quorums.count} " \
+                      "permissions=#{quorum.permissions.count}"
 report :stage_label, stage.label
 report :quorum_threshold, quorum.threshold
 
-request.events.create!(
-  **ChangeRequests::Event::SYSTEM_ATTRIBUTES,
-  kind: "requested", operation_version: request.operation_version, occurred_at: Time.now
-)
+# A guard refusing, with the whole stack loaded and no framework under it.
+begin
+  ChangeRequests::Commands::Approve.call(request: request, actor: requester)
+  report :requester_may_approve, "NOT REFUSED"
+rescue ChangeRequests::NotApprovable => e
+  report :requester_refused, e.reason
+end
+
+ChangeRequests::Commands::Approve.call(request: request.reload, actor: first)
+report :after_one, request.reload.status
+
+ChangeRequests::Commands::Approve.call(request: request.reload, actor: second)
+report :after_two, request.reload.status
+report :stage_after_two, request.stages.sole.reload.status
 
 report :events, request.reload.events.count
-report :event_actor, request.events.first.actor_label
+report :event_kinds, request.events.order(:occurred_at).map(&:kind).join(",")
+report :event_actor, request.events.find_by(kind: "approved").actor_label
+report :closing_actor, request.events.find_by(kind: "stage_satisfied").actor_label
 
-# The guards refuse a terminal request even with no command layer loaded.
+# The model layer is the floor beneath the commands, and it holds with nothing else loaded.
 request.update!(status: "canceled")
 
 begin

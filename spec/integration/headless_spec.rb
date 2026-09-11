@@ -56,8 +56,10 @@ RSpec.describe "the domain core, headless" do
     end
   end
 
-  describe "creating a request" do
-    it "creates one" do
+  # DoD item 5, and the proof the command layer needs no Rails either: create, refuse, approve,
+  # approve again, and reach `approved` - all of it driven through the commands a host calls.
+  describe "running a request through the commands" do
+    it "creates one from the declaration, not from hand-built rows" do
       expect(probe).to include("request=pending")
     end
 
@@ -70,17 +72,45 @@ RSpec.describe "the domain core, headless" do
       expect(probe).to include("payload_roundtrip=editor")
     end
 
-    it "materialises a stage and a quorum, with labels resolving through the humanize fallback" do
-      expect(probe).to include("stage_label=Operational")
+    it "materialises the workflow the operation describes" do
+      expect(probe).to include("materialised=stages=1 quorums=1 permissions=1")
       expect(probe).to include("quorum_threshold=2")
     end
 
-    it "appends an event attributed to the System sentinel" do
-      expect(probe).to include("events=1")
-      expect(probe).to include("event_actor=System")
+    # No engine, so config/locales/en.yml is not on I18n.load_path and `approval` humanizes.
+    it "resolves a stage label through the humanize fallback" do
+      expect(probe).to include("stage_label=Approval")
     end
 
-    # The model layer is the floor beneath the commands, and it holds with no command layer loaded.
+    it "refuses the requester their own approval, with the whole stack and no framework" do
+      expect(probe).to include("requester_refused=requester")
+    end
+
+    it "holds at pending until the quorum is met" do
+      expect(probe).to include("after_one=pending")
+    end
+
+    it "reaches approved on the second approval" do
+      expect(probe).to include("after_two=approved")
+      expect(probe).to include("stage_after_two=closed")
+    end
+
+    it "writes the whole trail through Commands::Base#emit" do
+      expect(probe)
+        .to include("event_kinds=requested,approved,approved,quorum_satisfied,stage_satisfied")
+    end
+
+    it "attributes a decision to the actor who made it" do
+      expect(probe).to include("event_actor=Grace Hopper")
+    end
+
+    # Closing a stage is the gem's own act, so the sentinel is what the trail names - and the
+    # sentinel needs no registered actor type, which is the point of it (§19.15).
+    it "attributes closing the stage to the System sentinel" do
+      expect(probe).to include("closing_actor=System")
+    end
+
+    # The model layer is the floor beneath the commands, and it holds with nothing else loaded.
     it "enforces terminal-state protection" do
       expect(probe).to include("terminal_guard=enforced")
     end

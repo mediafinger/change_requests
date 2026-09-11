@@ -34,8 +34,14 @@ RSpec.describe ChangeRequests::Guards::Approve do
 
   # Order decides which reason a user sees, so it is asserted, not assumed (§7).
   describe "the refusal order" do
-    it "prefers :not_pending over everything a pending request could say" do
+    it "prefers :already_finalized over everything else, for a request that is over" do
       change_request.update!(status: "canceled")
+
+      expect(guard.reason).to eq(:already_finalized)
+    end
+
+    it "prefers :not_pending over everything a still-open request could say" do
+      change_request.update!(status: "approved")
 
       expect(guard.reason).to eq(:not_pending)
     end
@@ -59,11 +65,19 @@ RSpec.describe ChangeRequests::Guards::Approve do
   end
 
   describe ":not_pending" do
-    %w(approved executing successful failed rejected canceled expired).each do |status|
+    %w(approved executing failed).each do |status|
       it "refuses a request that is #{status}" do
         change_request.update!(status: status)
 
         expect(guard.reason).to eq(:not_pending)
+      end
+    end
+
+    ChangeRequests::Request::FINAL_STATUSES.each do |status|
+      it "refuses a request that is already #{status} with the shared reason (Q48)" do
+        change_request.update!(status: status)
+
+        expect(guard.reason).to eq(:already_finalized)
       end
     end
   end
