@@ -12,7 +12,7 @@ module ChangeRequests
 
     KINDS = %w(
       requested approved unapproved rejected commented canceled
-      quorum_satisfied stage_satisfied stage_closed overridden
+      quorum_satisfied stage_satisfied overridden
       execution_started executed execution_failed
       expired reaped operation_undeclared
     ).freeze
