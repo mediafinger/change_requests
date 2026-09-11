@@ -325,7 +325,7 @@ groups are consecutive stages. There is no request-level mode column.
 | `name`              | string, not null                         | declaration identifier, `snake_case`; §5.9         |
 | `satisfied_by`      | string, not null, default `"any_quorum"` | `any_quorum` \| `all_quorums`                      |
 | `satisfied_at`      | datetime, null                           | when its quorums were first met                    |
-| `rejected_at`       | datetime, null                           | when it was first rejected - §7.1; written from M9b, column outstanding |
+| `rejected_at`       | datetime, null                           | when it was first rejected - §7.1; written from M9b                |
 | `closed_at`         | datetime, null                           | when it became immutable - §7.1                    |
 | `status`            | string, not null, default `"pending"`    | `pending` \| `satisfied` \| `closed` \| `rejected` |
 
@@ -337,10 +337,9 @@ immutable** (§7.1).
 
 `satisfied` and `rejected` are both *decided but reversible* while `op.cooldown` has not elapsed: a stage
 returns to `pending` when the decision that put it there is withdrawn. `rejected_at` is the rejection's
-counterpart to `satisfied_at` and nothing writes it until M9b, but it **belongs in the first migration** for
-the same reason the staged schema does (§5): one nullable timestamp added while M1 is unreleased is cheaper
-than a migration in every host application later. **Not yet in the install template** - a one-line addition
-outstanding.
+counterpart to `satisfied_at`. Nothing writes it until M9b, but it ships in the **first migration** for the
+same reason the staged schema does (§5): one nullable timestamp added while M1 is unreleased is cheaper than
+a migration in every host application later.
 
 ### 5.3 `change_request_quorums`
 
@@ -1317,8 +1316,12 @@ ChangeRequests::Error
 └── StaleRequest                  (optimistic lock conflict)
 ```
 
-Every `TransitionError` carries `#request`, `#reason` (a symbol) and a translated `#message`. The engine
-controller `rescue_from ChangeRequests::Error` once, and hosts get a flash instead of an exception page.
+Every `TransitionError` carries `#request`, `#reason` (a symbol) and a translated `#message`, and so does
+`NotAuthorized` - the `Refusal` module is shared by both, because a guard raises whichever of them it
+declared and a host branches on `#reason` either way. `NotAuthorized` stays a *sibling* of the
+`TransitionError` family rather than a member: "the actor may never do this" is a different answer from
+"not yet". The engine controller `rescue_from ChangeRequests::Error` once, and hosts get a flash instead of
+an exception page.
 
 ### 7.1 Workflow evaluation
 
@@ -1427,7 +1430,7 @@ sitting in stage one.
 | `Approve`            | eligible approver for a quorum of the current **open** stage  | request `pending`; actor is not the requester; actor has not already decided this stage | approval row + quorum links; `EvaluateWorkflow`    |
 | `Unapprove`          | the actor who gave that decision                              | their stage still reversible (`pending`, or `satisfied`/`rejected` within cooldown)     | decision and links deleted; `EvaluateWorkflow`     |
 | `Reject`             | eligible approver of the current open stage, or the requester | request `pending`; reason present                                                       | stage `rejected`; request `rejected` once the cooldown elapses, or recorded only (§7.1) |
-| `Cancel`             | the requester, or any eligible approver                       | request not in a final status; reason present                                           | request `canceled`                                 |
+| `Cancel`             | the requester, or any eligible approver                       | request not in a final status and not `executing`; reason present                       | request `canceled`                                 |
 | `Comment`            | the requester, or any eligible approver                       | always: final statuses **and** undeclared operations included                           | `commented` event                                  |
 | `Execute`            | any actor permitted by the separation-of-duties config        | `approved`, or `failed` and retryable                                                   | §8                                                 |
 | `Execute` + override | actor satisfying `op.override` permissions, not the requester | request non-final and not already `executing`; reason present                           | §8.1                                               |
