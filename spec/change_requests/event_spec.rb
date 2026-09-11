@@ -177,4 +177,34 @@ RSpec.describe ChangeRequests::Event do
       expect(change_request.reload.events.to_a).to eq([first, second])
     end
   end
+
+  # §5.5: "Every event is written through one path (emit in Commands::Base), so the column is
+  # populated in a single place." A runtime spec could only prove it for the paths it exercises;
+  # this proves it for the code, which is where a second write path would be introduced.
+  describe "the single write path (§5.5)" do
+    let(:writes) do
+      /
+        (?: \bChangeRequests::Event | \bEvent | \bevents )
+        \s* (?: \.\s*(?:create|create!|new|build|insert|insert_all|upsert|upsert_all)\b | <<\s )
+      /x
+    end
+
+    let(:emit) { File.expand_path("../../lib/change_requests/commands/base.rb", __dir__) }
+    let(:domain_files) { Dir[File.expand_path("../../lib/**/*.rb", __dir__)] }
+
+    it "scans the whole domain, so an empty result means something" do
+      expect(domain_files.size).to be > 20
+      expect(domain_files).to include(emit)
+    end
+
+    it "has teeth - the pattern matches the write it is guarding" do
+      expect(File.read(emit)).to match(writes)
+    end
+
+    it "writes events nowhere but Commands::Base#emit" do
+      offenders = (domain_files - [emit]).select { |path| File.read(path).match?(writes) }
+
+      expect(offenders).to be_empty
+    end
+  end
 end
