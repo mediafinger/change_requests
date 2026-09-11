@@ -21,6 +21,7 @@ class CreateChangeRequests < ActiveRecord::Migration[<%= migration_version %>]
       t.string :requester_type, null: false
       t.string :requester_id, null: false
       t.string :requester_label, null: false
+      t.string :requester_identity
 
       t.string :executer_type
       t.string :executer_id

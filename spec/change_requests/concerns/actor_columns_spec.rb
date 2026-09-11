@@ -16,12 +16,18 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
       expect(change_request.requester_label).to eq("Grace (admin)")
     end
 
-    it "reads the triple back" do
+    it "reads the reference back" do
       admin = Admin.create!(name: "Grace")
       change_request.requester = admin
 
       expect(change_request.requester)
-        .to eq(type: "Admin", id: admin.id.to_s, label: "Grace (admin)")
+        .to eq(type: "Admin", id: admin.id.to_s, label: "Grace (admin)", identity: nil)
+    end
+
+    it "reads back only the columns the reference declares" do
+      change_request.executer = Admin.create!(name: "Grace")
+
+      expect(change_request.executer.keys).to contain_exactly(:type, :id, :label)
     end
 
     it "is nil when nothing is set" do
@@ -34,6 +40,37 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
 
       expect(change_request.executer_type).to be_nil
       expect(change_request.executer_label).to be_nil
+    end
+
+    # (type, id) is airtight within one actor class and blind across them. config.actor_identity is
+    # the opt-in lever for hosts that do carry a shared identity, and it is snapshotted like the
+    # label rather than recomputed (§9.4).
+    describe "identity: true" do
+      it "is null when the host declares no shared identity" do
+        change_request.requester = Admin.create!(name: "Grace")
+
+        expect(change_request.requester_identity).to be_nil
+      end
+
+      it "snapshots what config.actor_identity returns" do
+        ChangeRequests.config.actor_identity = ->(_person) { "person-7" }
+        change_request.requester = Admin.create!(name: "Grace")
+
+        expect(change_request.requester_identity).to eq("person-7")
+        expect(change_request.requester[:identity]).to eq("person-7")
+      end
+
+      it "is snapshotted, so a later change to the lambda does not move it" do
+        ChangeRequests.config.actor_identity = ->(person) { person.name }
+        change_request.requester = Admin.create!(name: "Grace")
+        ChangeRequests.config.actor_identity = ->(_person) { "someone else" }
+
+        expect(change_request.requester_identity).to eq("Grace")
+      end
+
+      it "is declared per reference: the tenant carries none" do
+        expect(ChangeRequests::Request.column_names).not_to include("tenant_identity")
+      end
     end
 
     # §5.7 consequence 5: the registry is the allowlist, and `actor.class.name` is only ever compared
@@ -98,7 +135,8 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
 
       admin.destroy
 
-      expect(request.reload.requester).to eq(type: "Admin", id: admin_id, label: "Grace (admin)")
+      expect(request.reload.requester)
+        .to eq(type: "Admin", id: admin_id, label: "Grace (admin)", identity: nil)
     end
 
     it "does not stop the request being loaded at all" do

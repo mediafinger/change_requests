@@ -23,8 +23,11 @@ module ChangeRequests
       class_methods do
         # `label: false` for a reference that names who *may* act rather than who did - the
         # eligibility rows carry no snapshot, because nothing has happened yet to snapshot.
+        #
+        # `identity: true` also snapshots `config.actor_identity`, which is what lets the gem tell
+        # that Admin#7 and User#99 are one human. Null unless the host configured it (§9.4).
         def actor_reference(prefix, optional: false, allow_system: false, registry: :actor_types,
-                            label: true)
+                            label: true, identity: false)
           declare_type_validation(prefix, optional: optional, allow_system: allow_system,
                                           registry: registry)
 
@@ -33,7 +36,7 @@ module ChangeRequests
             validates :"#{prefix}_label", presence: true if label
           end
 
-          define_actor_accessors(prefix, registry: registry, label: label)
+          define_actor_accessors(prefix, registry: registry, label: label, identity: identity)
         end
 
         # QuorumPermission carries a type and nothing else: NULL there means "any registered class".
@@ -57,7 +60,7 @@ module ChangeRequests
                     allow_nil: true
         end
 
-        def define_actor_accessors(prefix, registry:, label:)
+        def define_actor_accessors(prefix, registry:, label:, identity:)
           generated = Module.new do
             # No `*_id=` override: the column is a string, so ActiveRecord already casts on
             # assignment. A User with a uuid key and an Admin with a bigint key share it (§5.7).
@@ -66,10 +69,11 @@ module ChangeRequests
 
               return nil if type.blank?
 
-              triple = { type: type, id: public_send(:"#{prefix}_id") }
-              triple[:label] = public_send(:"#{prefix}_label") if label
+              reference = { type: type, id: public_send(:"#{prefix}_id") }
+              reference[:label] = public_send(:"#{prefix}_label") if label
+              reference[:identity] = public_send(:"#{prefix}_identity") if identity
 
-              triple
+              reference
             end
 
             define_method(:"#{prefix}=") do |actor|
@@ -82,6 +86,8 @@ module ChangeRequests
               public_send(:"#{prefix}_type=", attributes[:type])
               public_send(:"#{prefix}_id=", attributes[:id])
               public_send(:"#{prefix}_label=", attributes[:label]) if label
+              public_send(:"#{prefix}_identity=", ChangeRequests.config.actor_identity&.call(actor)) \
+                if identity && actor
             end
           end
 
