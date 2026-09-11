@@ -37,6 +37,7 @@ module ChangeRequests
         not_approved
         attempts_exhausted
         not_expired
+        not_expirable
         not_system
       ).freeze
 
