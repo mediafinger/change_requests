@@ -259,6 +259,16 @@ RSpec.describe "the generated schema" do
       expect(nullable).to be(true)
     end
 
+    # A stage can be satisfied, rejected or closed, and each has its own timestamp. rejected_at is
+    # not written until M9b's cooldown, and ships now so no host needs a second migration for it
+    # (§5.2, §7.1) - a column nothing references yet is easily mistaken for a leftover.
+    it "gives every stage outcome its own timestamp" do
+      types = %w(satisfied_at rejected_at closed_at)
+              .to_h { |column| [column, column_type("change_request_stages", column)] }
+
+      expect(types.values.uniq).to eq(["timestamp(6) without time zone"])
+    end
+
     # §19.12 and §19.13: the attempts rows are the count, and the request id is the idempotency key.
     it "carries neither an attempts_count nor an idempotency_key column" do
       names = connection.columns("change_requests").map(&:name)
@@ -324,6 +334,7 @@ RSpec.describe "the generated schema" do
         "change_requests" => %w(requester_identity executer_type executer_id executer_label
                                 tenant_type tenant_id tenant_label expires_at executed_at
                                 overridden_at),
+        "change_request_stages" => %w(satisfied_at rejected_at closed_at),
         "change_request_quorums" => %w(name satisfied_at),
         "change_request_quorum_permissions" => %w(permission actor_type),
         "change_request_approvals" => %w(approver_identity comment),
