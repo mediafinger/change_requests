@@ -128,6 +128,55 @@ RSpec.describe ChangeRequests::Error do
     end
   end
 
+  # Regression: Guards::Base#check! builds whichever class a guard declared with request: and
+  # reason:, and NotAuthorized was a plain Error. Ruby folds keywords into the message for a method
+  # that takes none, so it silently produced message "{request: …, reason: …}" and no readers at
+  # all - losing the symbol hosts branch on. Comment is the first guard to declare it.
+  describe ChangeRequests::NotAuthorized do
+    subject(:error) { described_class.new(request: :a_request, reason: :not_permitted) }
+
+    it "carries the request" do
+      expect(error.request).to eq(:a_request)
+    end
+
+    it "carries the reason, which is the contract hosts branch on" do
+      expect(error.reason).to eq(:not_permitted)
+    end
+
+    it "words its message from the reason, not from the keywords it was handed" do
+      expect(error.message).to eq("not_permitted")
+    end
+
+    it "still accepts a plain message, which Commands::Create raises it with" do
+      expect(described_class.new("Admin may not raise change requests").message)
+        .to eq("Admin may not raise change requests")
+    end
+
+    # §8 keeps them apart: "the actor may never do this" is a different answer from "not yet", and
+    # a host rescues them separately.
+    it "is a sibling of the TransitionError family, not a member of it" do
+      expect(described_class.ancestors).not_to include(ChangeRequests::TransitionError)
+      expect(described_class.ancestors).to include(ChangeRequests::Error)
+    end
+  end
+
+  # One module, included by both, so the two cannot drift.
+  describe ChangeRequests::Refusal do
+    it "is what gives a refusal its request, reason and translated message" do
+      expect(ChangeRequests::TransitionError.ancestors).to include(described_class)
+      expect(ChangeRequests::NotAuthorized.ancestors).to include(described_class)
+    end
+
+    it "is included by every class Guards::Base can be told to raise" do
+      declared = [ChangeRequests::NotApprovable, ChangeRequests::NotUnapprovable,
+                  ChangeRequests::NotRejectable, ChangeRequests::NotCancelable,
+                  ChangeRequests::NotExecutable, ChangeRequests::AlreadyFinalized,
+                  ChangeRequests::NotAuthorized]
+
+      expect(declared.reject { |klass| klass.ancestors.include?(described_class) }).to be_empty
+    end
+  end
+
   describe ChangeRequests::TargetFailed do
     # The original is never wrapped by hand: TargetFailed is raised from inside the rescue that
     # caught it, so Ruby preserves it for free (§7, §8 T3).

@@ -22,31 +22,17 @@ module ChangeRequests
   #   └── StaleRequest                  (optimistic lock conflict)
   class Error < StandardError; end
 
-  # Raised by config.validate! and operations.verify!. Message lists every problem found at once.
-  class ConfigurationError < Error; end
-
-  # Raised before the type string is constantized, so a typo fails at creation, not at render time.
-  class UnknownActorType < Error; end
-
-  # No live declaration for the request's operation_key. Every guard refuses except Comment (§5.11).
-  class UnknownOperation < Error; end
-
-  # Payload is not a JSON object. Matching it to the target's signature is the host's job (§6.12).
-  class InvalidPayload < Error; end
-
-  # A creation-time fact was reassigned. Raised by Concerns::ReadonlyAttributes, not attr_readonly.
-  class ReadonlyAttribute < Error; end
-
-  # The actor may never do this. "Not yet" is a TransitionError.
-  class NotAuthorized < Error; end
-
-  # A transition the request will not accept (§7.2). Carries #request and #reason:
+  # What every refusal a guard raises carries (§7). `reason` is the contract - controllers branch on
+  # it, views render it as a disabled button's tooltip. The message is for humans.
   #
   #   fail NotApprovable.new(request:, reason: :already_decided)
   #
-  # `reason` is the contract - controllers branch on it, views render it as a disabled button's
-  # tooltip. The message is for humans.
-  class TransitionError < Error
+  # A module rather than a base class, because §8 keeps NotAuthorized a *sibling* of the
+  # TransitionError family: "the actor may never do this" is a different answer from "not yet", and
+  # a host rescues them apart. Guards::Base#check! builds whichever class a guard declared with the
+  # same two keywords, so both have to accept them - without this, Ruby folds the keywords into the
+  # message and the reason is silently lost.
+  module Refusal
     # Shared with the guards, so a disabled button and a raised error cannot word :not_pending
     # differently. M1b-13 ships the translations.
     I18N_SCOPE = "change_requests.errors"
@@ -64,9 +50,15 @@ module ChangeRequests
       "#{I18N_SCOPE}.#{reason || self.class.error_key}"
     end
 
-    # NotApprovable => "not_approvable". Used when a caller raised without a reason.
-    def self.error_key
-      name.split("::").last.gsub(/([a-z\d])([A-Z])/, '\1_\2').downcase
+    def self.included(base)
+      base.extend(ClassMethods)
+    end
+
+    module ClassMethods
+      # NotApprovable => "not_approvable". Used when a caller raised without a reason.
+      def error_key
+        name.split("::").last.gsub(/([a-z\d])([A-Z])/, '\1_\2').downcase
+      end
     end
 
     private
@@ -76,6 +68,31 @@ module ChangeRequests
 
       Translation.translate(i18n_key, default: fallback)
     end
+  end
+
+  # Raised by config.validate! and operations.verify!. Message lists every problem found at once.
+  class ConfigurationError < Error; end
+
+  # Raised before the type string is constantized, so a typo fails at creation, not at render time.
+  class UnknownActorType < Error; end
+
+  # No live declaration for the request's operation_key. Every guard refuses except Comment (§5.11).
+  class UnknownOperation < Error; end
+
+  # Payload is not a JSON object. Matching it to the target's signature is the host's job (§6.12).
+  class InvalidPayload < Error; end
+
+  # A creation-time fact was reassigned. Raised by Concerns::ReadonlyAttributes, not attr_readonly.
+  class ReadonlyAttribute < Error; end
+
+  # The actor may never do this. "Not yet" is a TransitionError.
+  class NotAuthorized < Error
+    include Refusal
+  end
+
+  # A transition the request will not accept (§7.2).
+  class TransitionError < Error
+    include Refusal
   end
 
   class NotApprovable < TransitionError; end
