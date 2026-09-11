@@ -325,13 +325,22 @@ groups are consecutive stages. There is no request-level mode column.
 | `name`              | string, not null                         | declaration identifier, `snake_case`; §5.9         |
 | `satisfied_by`      | string, not null, default `"any_quorum"` | `any_quorum` \| `all_quorums`                      |
 | `satisfied_at`      | datetime, null                           | when its quorums were first met                    |
+| `rejected_at`       | datetime, null                           | when it was first rejected - §7.1; written from M9b, column outstanding |
 | `closed_at`         | datetime, null                           | when it became immutable - §7.1                    |
 | `status`            | string, not null, default `"pending"`    | `pending` \| `satisfied` \| `closed` \| `rejected` |
 
 Unique indexes `(change_request_id, position)` and `(change_request_id, name)`.
 
 Stages are materialised from the operation when the request is created; their definition is never edited.
-A stage's lifecycle is `pending → satisfied → closed`, and a **closed stage is immutable** (§7.1).
+A stage's lifecycle is `pending → satisfied → closed`, or `pending → rejected`, and a **closed stage is
+immutable** (§7.1).
+
+`satisfied` and `rejected` are both *decided but reversible* while `op.cooldown` has not elapsed: a stage
+returns to `pending` when the decision that put it there is withdrawn. `rejected_at` is the rejection's
+counterpart to `satisfied_at` and nothing writes it until M9b, but it **belongs in the first migration** for
+the same reason the staged schema does (§5): one nullable timestamp added while M1 is unreleased is cheaper
+than a migration in every host application later. **Not yet in the install template** - a one-line addition
+outstanding.
 
 ### 5.3 `change_request_quorums`
 
@@ -891,7 +900,7 @@ ChangeRequests.operations.define "members.update_roles" do |op|
   op.idempotent   = true
   op.max_attempts = 3
   op.expires_in   = 7.days
-  op.cooldown     = 0                          # minutes a satisfied stage stays reversible - §7.1
+  op.cooldown     = 0                          # minutes a decided stage stays reversible - §7.1
 end
 ```
 
@@ -1319,6 +1328,9 @@ command like the others - guard, mutate, emit - but an **internal** one: it take
 it, and it is invoked only from `Approve`, `Unapprove` and `Reject`.
 
 ```
+0. any rejection standing on the current stage?
+      yes → stage rejected; it cannot be satisfied however many approvals it holds
+      no, and the stage was rejected → back to pending; clear rejected_at
 1. recount every pending quorum of the current stage
       quorum satisfied  ⟺  linked approvals ≥ threshold
 2. stage satisfied      ⟺  any_quorum:  at least one quorum satisfied
@@ -1326,7 +1338,16 @@ it, and it is invoked only from `Approve`, `Unapprove` and `Reject`.
 3. satisfied, cooldown == 0  → close_stage! now
    satisfied, cooldown  > 0  → set satisfied_at; enqueue CloseStageJob at satisfied_at + cooldown
    no longer satisfied       → clear satisfied_at; any pending job becomes a no-op
+4. rejected, cooldown == 0   → finalise the request `rejected` now
+   rejected, cooldown  > 0   → set rejected_at; enqueue CloseStageJob at rejected_at + cooldown
+   no longer rejected        → clear rejected_at; any pending job becomes a no-op
 ```
+
+Step 0 runs first because a rejection outranks any number of approvals: a stage holding one is rejected,
+not satisfied, and the approvals it already collected stay on the row waiting for the rejection to be
+withdrawn. This is the shape that makes the pull-request loop work - reject, the requester fixes the
+problem, the rejector withdraws their rejection and approves - without the earlier approvals being lost.
+Under `config.only_record_rejections` a rejection never stops the stage, so step 0 does nothing.
 
 `close_stage!` sets `closed_at` and status `closed`, emits `stage_satisfied` naming the quorum that closed
 it, then either advances `current_stage_position` to the next stage or - when none remains - sets the
@@ -1340,31 +1361,59 @@ for, so one person cannot close two quorums that must both be met.
 **Closed stages are immutable.** No approval, unapproval or rejection touches a closed stage, and there is
 no rollback into an earlier one. Once a stage closes, its outcome is a historical fact.
 
-**Cooldown.** `op.cooldown` (minutes, default `0`) keeps a satisfied stage open instead of closing it
-immediately. During the window an approver may still unapprove; if that drops a quorum below threshold the
-stage returns to `pending`, `satisfied_at` is cleared, and the request does not advance. A cooldown greater
-than zero requires ActiveJob - declaring one without it fails `verify!` with a `ConfigurationError`.
+A **rejected** stage is not a closed one. It is a stage whose outcome is decided but still reversible,
+exactly like a satisfied stage inside its cooldown window, and it returns to `pending` if every rejection on
+it is withdrawn. Only `closed` and `rejected`-past-its-window are final.
+
+**Cooldown.** `op.cooldown` (minutes, default `0`) keeps a **decided** stage reversible instead of acting on
+it immediately. It governs both decisions, because a mistaken rejection is at least as expensive as a
+mistaken approval and the plan gave only one of them a way back:
+
+- **Satisfied.** The stage stays open. During the window an approver may unapprove; if that drops a quorum
+  below threshold the stage returns to `pending`, `satisfied_at` is cleared, and the request does not
+  advance.
+- **Rejected.** The stage is `rejected` and cannot be satisfied, but **the request stays `pending`** and
+  does not finalise until the window elapses. During it the rejector may unapprove their own rejection
+  (§7.2); when the last rejection on the stage goes, the stage returns to `pending`, `rejected_at` is
+  cleared, and the approvals already collected are still there to count.
+
+A cooldown greater than zero requires ActiveJob - declaring one without it fails `verify!` with a
+`ConfigurationError`. At the default of `0` both decisions act immediately, which is M1's behaviour
+exactly.
 
 `CloseStageJob` re-evaluates on run rather than trusting its scheduling: it does nothing if the stage is no
-longer satisfied, and nothing if it is already closed. Duplicate or late jobs are therefore harmless.
+longer satisfied or no longer rejected, and nothing if it is already closed or the request already final.
+Duplicate or late jobs are therefore harmless.
 
-A *lost* job is not harmless - the stage would stay satisfied-but-open forever - so closing does not depend
-on the job alone. `Maintenance.close_due_stages!` closes any stage whose `satisfied_at + cooldown` has
-passed, on the same schedule as the other sweepers. The job is the fast path; the sweeper is the guarantee.
+A *lost* job is not harmless - the stage would stay decided-but-open forever - so acting does not depend on
+the job alone. `Maintenance.close_due_stages!` settles any stage whose `satisfied_at + cooldown` or
+`rejected_at + cooldown` has passed, on the same schedule as the other sweepers. The job is the fast path;
+the sweeper is the guarantee.
 This is the same pattern as the stuck-execution reaper (§8).
 
-**Unapprove** is permitted only while the actor's own stage is open - `pending`, or `satisfied` inside a
-cooldown window. It deletes the actor's approval row and its quorum links, emits `unapproved`, and re-runs
-the evaluation above. It is never permitted on a closed stage, on an `approved` request, or in any final
-status.
+**Unapprove** is permitted only while the actor's own stage is still reversible - `pending`, or `satisfied`
+or `rejected` inside a cooldown window. It deletes the actor's own decision row, approval or rejection, and
+any quorum links it carried, emits `unapproved`, and re-runs the evaluation above. It is never permitted on
+a closed stage, on an `approved` request, or in any final status.
 
-**Rejection is a stop, not a count.** One rejection from any eligible approver or from the requester rejects
-the whole request immediately: request status `rejected` (final), the current stage status `rejected`, and a
-`rejected` event. A reason is mandatory - `Reject` without one raises. Rejection thresholds are deliberately
-not modelled.
+**Rejection is a stop, not a count.** One rejection from any eligible approver or from the requester stops
+the current stage: stage status `rejected`, a rejection row, and a `rejected` event. A reason is mandatory -
+`Reject` without one raises. Rejection thresholds are deliberately not modelled: a stage holding one
+rejection is rejected, whatever its approvals say.
 
-`config.only_record_rejections = true` records the decision and the event without short-circuiting: the
-workflow continues, and the rejector has spent their decision on that stage and cannot later approve it.
+**How final that stop is depends on `op.cooldown`.** At `0` - the default, and all of M1 - the request is
+set `rejected` in the same breath and that is the end of it. Above `0` the stage is rejected but the request
+stays `pending` for the window, so the rejector can withdraw a rejection they regret. The typical loop:
+a request is rejected, the requester fixes what was wrong, the rejector unapproves their rejection and
+approves instead - and the approvals given by everyone else are still on the row.
+
+The rejection row is written in both `only_record_rejections` modes, so `change_request_approvals` is the
+complete record of who decided what on each stage and the unique index enforces one decision per person
+identically either way.
+
+`config.only_record_rejections = true` records the decision and the event without stopping anything: the
+stage is never rejected, the workflow continues, and the rejector has spent their decision on that stage and
+cannot later approve it - unless they unapprove it first.
 
 ### 7.2 Guard rules
 
@@ -1376,8 +1425,8 @@ sitting in stage one.
 |----------------------|---------------------------------------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------|
 | `Create`             | any actor whose type declares `may_request`                   | operation declared; payload valid                                                       | `pending` request, stages and quorums materialised |
 | `Approve`            | eligible approver for a quorum of the current **open** stage  | request `pending`; actor is not the requester; actor has not already decided this stage | approval row + quorum links; `EvaluateWorkflow`    |
-| `Unapprove`          | the approver who gave that approval                           | their stage still open (`pending`, or `satisfied` within cooldown)                      | approval and links deleted; `EvaluateWorkflow`     |
-| `Reject`             | eligible approver of the current open stage, or the requester | request `pending`; reason present                                                       | request `rejected`, or recorded only (§7.1)        |
+| `Unapprove`          | the actor who gave that decision                              | their stage still reversible (`pending`, or `satisfied`/`rejected` within cooldown)     | decision and links deleted; `EvaluateWorkflow`     |
+| `Reject`             | eligible approver of the current open stage, or the requester | request `pending`; reason present                                                       | stage `rejected`; request `rejected` once the cooldown elapses, or recorded only (§7.1) |
 | `Cancel`             | the requester, or any eligible approver                       | request not in a final status; reason present                                           | request `canceled`                                 |
 | `Comment`            | the requester, or any eligible approver                       | always: final statuses **and** undeclared operations included                           | `commented` event                                  |
 | `Execute`            | any actor permitted by the separation-of-duties config        | `approved`, or `failed` and retryable                                                   | §8                                                 |
@@ -1433,7 +1482,8 @@ Additional guarantees:
 - **Expiry.** `Maintenance.expire_stale!` moves `pending`/`approved` requests past `expires_at` to `expired`.
 - **Undeclared operations.** `Maintenance.cancel_undeclared!` cancels non-final requests whose
   `operation_key` is no longer declared (§5.11).
-- **Due stages.** `Maintenance.close_due_stages!` closes satisfied stages whose cooldown has elapsed, so a
+- **Due stages.** `Maintenance.close_due_stages!` settles decided stages whose cooldown has elapsed - closing
+  satisfied ones and finalising rejected ones - so a
   lost `CloseStageJob` cannot strand a request (§7.1).
 
 **Separation of duties** becomes explicit configuration rather than an accident:
@@ -2083,7 +2133,8 @@ Required areas:
 - guards (a truth table per guard × status × actor role - table-driven, one `where` per row)
 - commands (happy path, every guard rejection, event emission, workflow advancement)
 - workflow evaluation, §7.1 in full: quorum satisfaction, `any_quorum` / `all_quorums`, one-quorum-per-
-  approval under `all_quorums`, stage closing with and without a cooldown, unapproval during the cooldown
+  approval under `all_quorums`, stage closing with and without a cooldown, unapproval during the cooldown,
+  a withdrawn rejection returning its stage to `pending`
   window, refusal after closing, `close_due_stages!` closing a stage whose job never ran, rejection
   short-circuiting, `only_record_rejections` - plus each of the four §6.9 shapes end-to-end, since those
   are the examples in the docs and must not rot
@@ -2177,7 +2228,8 @@ Plus a static check that no file under the domain directories mentions `ActionCo
   override policy, boot-time verification
 - Sequential stages of AND/OR-ed quorums, each quorum a threshold count; per-quorum permission matching
 - Eligibility by permission x actor type, or by named approver
-- Optional per-operation `cooldown` keeping a satisfied stage reversible for a configurable window
+- Optional per-operation `cooldown` keeping a decided stage - satisfied *or* rejected - reversible for a
+  configurable window
 - Separation of duties: requester cannot approve; execute and override configurable
 - Approval withdrawal, with demotion when a quorum is lost
 - Rejection with a mandatory reason, stopping the request by default or recorded only
@@ -2239,7 +2291,7 @@ Estimates assume one experienced developer working from this plan.
 | **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                          | §13         | 4 d    |
 | **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                                                              | §14         | 3–4 d  |
 | **M9a** |           | Multi-quorum evaluation: `all_quorums`, one-quorum-per-approval linking, named approvers. `any_quorum`, sequential stage advance and stage closing land in M1b                                                             | §7.1        | 2–3 d  |
-| **M9b** |           | `op.cooldown`: `CloseStageJob`, unapproval inside the window, `close_due_stages!` fallback                                                                                                                                 | §7.1        | 1–2 d  |
+| **M9b** |           | `op.cooldown` over both decisions: `CloseStageJob`, unapproval inside the window, a rejected stage returning to `pending` when its last rejection is withdrawn, `close_due_stages!` fallback                                | §7.1        | 2–3 d  |
 | **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                                                                           | §5.3, §11   | 2 d    |
 | **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                                                                            | §10         | 2–3 d  |
 | **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                                                                        | -           | 4–5 d  |
@@ -2329,6 +2381,13 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
     *declared*, and the gem's models load before Rails configures anything, so every `belongs_to` was
     silently optional until the base class set it. Any other setting read at declaration time gets the same
     treatment.
+20. **`op.cooldown` governs rejection as well as satisfaction** (§7.1). The earlier design made a rejection
+    final the instant it was written while an approval stayed reversible, so a mistyped rejection killed a
+    request outright and the only recovery was raising a new one - losing every approval already collected.
+    A rejection now stops the *stage* immediately and finalises the *request* only once the window elapses,
+    which is what gives `Unapprove` something to undo. At the default of `0` the behaviour is unchanged, so
+    M1 is unaffected; the reversible half ships with M9b. A stage holding a standing rejection can never be
+    satisfied, and returns to `pending` when the last rejection on it is withdrawn.
 
 ## 20. Appendix: salvage from the existing implementations
 
