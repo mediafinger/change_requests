@@ -1,12 +1,18 @@
 # ChangeRequests — Implementation Plan for Milestone 1 (v0.2.0)
 
-**Date:** 2026-09-10
+**Written:** 2026-09-10 — **revised against the build:** 2026-09-11
 **Source of truth:** [PLAN.md](PLAN.md) — §4, §5, §7 primarily. Section references below point there.
 **Target release:** `0.2.0` (M1a + M1b in the §17 milestone table)
+**Status:** 29 of 34 tickets merged (PRs #1–#36, `main`). Five remain: **M1b-11 … M1b-15**.
 
-All decisions raised by the first draft of this document have been taken and folded back into PLAN.md.
-§7 records them, §8 records the two questions closed afterwards, and §9 the thirteen issues found in
-PLAN.md and their resolutions. Nothing in Milestone 1 is waiting on a decision.
+§7 records the five blocking decisions taken before the build started, §9 the thirteen issues found in
+PLAN.md, and §8 the questions raised during the build — Q11–Q33 during M1a and M1b-1…M1b-10, and Q34–Q40
+raised by this revision. **All are answered.** Nothing in the remaining five tickets is waiting on a
+decision.
+
+This document is now two things at once: a ticket list for the work that remains, and the record of what the
+delivered tickets actually shipped. Where the build diverged from the ticket, the ticket carries an **As
+built** note rather than being rewritten — the divergence is the finding, and erasing it loses it.
 
 ---
 
@@ -19,8 +25,8 @@ Milestone 1 is two parts of the §17 table, as amended:
 | **M1a** | Migrations for all nine tables, written as the install-generator template; models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability               | §4, §5 | 7 d          |
 | **M1b** | Guards for the whole §7.2 table and commands for all of it except `Execute`; a minimal `Operations`/`Operation`; `with_lock`; sequential multi-stage single-quorum evaluation; errors | §7     | 11 d         |
 
-**In scope for this document:** everything needed to get from the current repository state to a tagged
-`0.2.0`, including the unfinished parts of **M0**, which is a hard prerequisite and is not started (§2).
+**In scope for this document:** everything needed to reach a tagged `0.2.0`, including **M0**, which was a
+hard prerequisite and is now complete. §2 says where the build stands.
 
 **Explicitly out of scope** (later milestones, do not build here): the full `op.workflow` DSL, `op.cooldown`,
 `verify!` and `ChangeRequests.request!` (M2); `Commands::Execute`, claim-then-invoke and the override branch
@@ -31,40 +37,67 @@ notifications (M10).
 
 ### Definition of done for 0.2.0
 
-1. `bundle exec rake ci` green - the specs plus every linter, architecture and security check the
-   repository carries - per [AGENTS.md](AGENTS.md).
-2. All nine tables migrate up **and** down cleanly on PostgreSQL 18, from the install-generator template,
-   with `uuid` primary keys and `uuid` foreign keys throughout - there is no other variant (§5.7).
-3. Every model in §5 exists with its validations, CHECK constraints, readonly guard, terminal-state guard
-   and event immutability (update **and** destroy), each covered by a spec.
-4. Every guard in the §7.2 table and every command except `Execute` exists for the sequential multi-stage,
-   single-quorum case, raises the §7 error taxonomy, and is covered by a table-driven truth-table spec.
-5. `spec/integration/headless_spec.rb` creates → approves → reaches `approved` with `Rails` undefined.
-6. CHANGELOG entry, version bump to `0.2.0`.
+| # | Criterion                                                                                                                                                                          | State                                                                                                                           |
+|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| 1 | `bundle exec rake ci` green - the specs plus every linter, architecture and security check the repository carries - per [AGENTS.md](AGENTS.md)                                     | ✅ 1130 examples, 0 failures, 4 pending                                                                                          |
+| 2 | All nine tables migrate up **and** down cleanly on PostgreSQL 18, from the install-generator template, with `uuid` primary keys and `uuid` foreign keys throughout (§5.7)          | ✅                                                                                                                               |
+| 3 | Every model in §5 exists with its validations, CHECK constraints, readonly guard, terminal-state guard and event immutability (update **and** destroy), each covered by a spec     | ✅                                                                                                                               |
+| 4 | Every guard in the §7.2 table and every command except `Execute` exists for the sequential multi-stage, single-quorum case, raises the §7 error taxonomy, and is covered by a spec | 🟡 `Guards::Execute` outstanding (M1b-11); `Commands::EvaluateWorkflow` outstanding (M1b-12), so nothing advances a stage yet   |
+| 5 | `spec/integration/headless_spec.rb` creates → approves → reaches `approved` with `Rails` undefined                                                                                 | 🟡 creates, materialises a stage and quorum by hand, and proves the terminal guard. The command layer is not exercised - M1b-14 |
+| 6 | ~~CHANGELOG entry, version bump to `0.2.0`~~ | **struck (Q37)** — neither gates 0.2.0 while there are no installations. `VERSION` is already `0.2.0`; the CHANGELOG becomes a real gate at M11 |
+
+The 4 pending examples are all the packaging spec skipping directories that do not exist yet; one of them,
+`config/locales`, is M1b-13's and stops pending when that ticket lands. The other three are M6's.
+
+**Five criteria, not six.** With item 6 struck, 0.2.0 is done when items 1–5 are — which means M1b-12 and
+M1b-14 are the two tickets standing between the repository and the release.
 
 ---
 
-## 2. Prerequisite: M0 is not started
+## 2. Where the build stands
 
-The repository contains the output of `bundle gem` plus documentation. Concretely:
+M0 and M1a are complete. M1b is complete through M1b-10. Everything below was built over 2026-09-09 …
+2026-09-11 on `main`, one ticket per PR, with `rake ci` green at every merge.
 
-| M0 deliverable (§17)                       | Status | Evidence                                                         |
-|--------------------------------------------|--------|------------------------------------------------------------------|
-| Engine skeleton, `isolate_namespace`       | ❌      | no `lib/change_requests/engine.rb`                               |
-| Zeitwerk loader                            | ❌      | `lib/change_requests.rb` is `require_relative` + an empty module |
-| `Configuration` + `validate!`              | ❌      | no `configuration.rb`                                            |
-| Gemspec deps (activerecord, activesupport) | ❌      | only `zeitwerk`; no `pg`, no `railties`, no `rspec-rails`        |
-| Dummy app (`spec/dummy`)                   | ❌      | `spec/` holds one version spec                                   |
-| CI matrix                                  | 🟡     | one Ruby, no PostgreSQL service, no `gemfiles/`                  |
-| `rake ci`                                  | ✅      | `Rakefile` already defines it                                    |
-| Headless + packaging specs                 | ❌      | absent                                                           |
-| Error taxonomy (`errors.rb`)               | ❌      | only `ChangeRequests::Error`                                     |
+| Ticket         | Scope                                                                                      | PR      | State                            |
+|----------------|--------------------------------------------------------------------------------------------|---------|----------------------------------|
+| M0-1 … M0-8    | deps, loader, config, errors, engine, dummy app, headless/packaging/architecture specs, CI | #1–#8   | ✅ merged                         |
+| —              | archspec, brakeman, CI consolidated to two jobs, dummy-app boot fix                        | #9–#12  | ✅ **unplanned**, see M0-7 / M0-8 |
+| M1a-1 … M1a-10 | `Record`, migration template, all nine models, actor columns, schema specs                 | #13–#23 | ✅ merged                         |
+| M1b-0          | `Operations`, `Operation`, `Workflow` value objects, spec isolation                        | #24     | ✅ merged                         |
+| —              | ADRs 0001–0014 in `docs/adr/`                                                              | #25     | ✅ **unplanned**, see M0-8        |
+| M1b-1 … M1b-10 | `Guards::Base` … `Guards::Expire` + their commands                                         | #26–#36 | ✅ merged                         |
+| —              | `change_request_stages.rejected_at` back-filled into the install template                  | #34     | ✅ **unplanned**, see M1a-2       |
+| **M1b-11**     | `Guards::Execute` (guard only)                                                             | —       | ⬜ **outstanding**                |
+| **M1b-12**     | `Commands::EvaluateWorkflow`                                                               | —       | ⬜ **outstanding**                |
+| **M1b-13**     | reason vocabulary and i18n                                                                 | —       | ⬜ **outstanding**                |
+| **M1b-14**     | truth tables, command specs, headless extension                                            | —       | ⬜ **outstanding**                |
+| **M1b-15**     | concurrency regression specs                                                               | —       | ⬜ **outstanding**                |
 
-Eight blocking tickets (M0-1 … M0-8, **5 days**) are included below.
+**What this means in practice.** Every guard except `Execute` refuses correctly and every command except
+`Execute` writes correctly — but **no approval advances anything**. `Approve`, `Unapprove` and `Reject` each
+carry a comment where the `Commands::EvaluateWorkflow` call goes, deliberately (**Q22**). A request created
+today collects approvals and stays `pending` forever. M1b-12 is the ticket that closes the loop, and it is
+the only one of the five that changes shipped code rather than adding to it.
+
+### 2.1 Work delivered that no ticket asked for
+
+Four items shipped outside the ticket list. None was a scope creep argument at the time; each is recorded
+here so the sum is visible and so §11's estimate is honest.
+
+| What                                                            | Why it happened                                                                                        | Ticket it belongs against |
+|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|---------------------------|
+| **archspec** replacing the hand-rolled Prism dependency checker | The hand-rolled glob never matched `lib/change_requests.rb`, the one file most able to break §2's rule | M0-7                      |
+| **brakeman** + **bundler-audit** rake tasks and CI steps        | §15.6 says "security checks" and never named them; `rake ci` needed concrete tasks                     | M0-8                      |
+| **CI consolidated from seven jobs to two**                      | Seven runners spent more time on checkout and `bundle install` than on checking                        | M0-8                      |
+| **`docs/adr/` — fourteen records** | Plan_M1.md records decisions *ahead of* the code; nothing recorded them *once the code existed* | — maintainer-owned (**Q40**) |
 
 ---
 
 ## 3. Build order
+
+Tickets marked ✅ are merged. The graph is kept as built, not pruned, because M1b-12 reaches back into
+three of them.
 
 ```
 M0-1 gemspec/deps ─┬─ M0-2 zeitwerk+prefix ─ M0-3 Configuration ─┬─ M0-6 dummy app ─┬─ M1a-2 migrations
@@ -78,27 +111,39 @@ M0-1 gemspec/deps ─┬─ M0-2 zeitwerk+prefix ─ M0-3 Configuration ─┬�
                                                         └──▶ M1a-9 actor columns ──▶ M1a-10 schema specs
                                                                     │
                                                                     ▼
-  M1b-0 Operations ─ M1b-1 Guards::Base ─ M1b-2 Authorization ─ M1b-3 Commands::Base ─ M1b-4 Create ─┬─ M1b-5 Approve
-                                                                                                     ├─ M1b-6 Unapprove
-                                                                                                     ├─ M1b-7 Reject
-                                                                                                     ├─ M1b-8 Cancel
-                                                                                                     ├─ M1b-9 Comment
-                                                                                                     ├─ M1b-10 Expire
+  M1b-0 Operations ─ M1b-1 Guards::Base ─ M1b-2 Authorization ─ M1b-3 Commands::Base ─ M1b-4 Create ─┬─ M1b-5 Approve  ✅
+                                    ✅               ✅                    ✅                ✅       ├─ M1b-6 Unapprove ✅
+                                                                                                     ├─ M1b-7 Reject    ✅
+                                                                                                     ├─ M1b-8 Cancel    ✅
+                                                                                                     ├─ M1b-9 Comment   ✅
+                                                                                                     ├─ M1b-10 Expire   ✅
                                                                                                      ├─ M1b-11 Guards::Execute
                                                                                                      └─ M1b-12 EvaluateWorkflow
                                                                                                               │
                                                             M1b-13 i18n ─ M1b-14 truth tables ─ M1b-15 races ◀┘
 ```
 
+**The graph understates M1b-12.** It is drawn as a leaf of M1b-4, but it is the only remaining ticket that
+**edits merged code**: `Commands::Approve`, `Commands::Unapprove` and `Commands::Reject` each hold a
+placeholder comment where its call goes, and each of their command specs asserts today's non-advancing
+behaviour. Those assertions have to change with it, in the same change set. Read its real shape as:
+
+```
+M1b-12 EvaluateWorkflow ──┬──▶ edits Commands::Approve   (+ its spec)
+                          ├──▶ edits Commands::Unapprove (+ its spec)
+                          ├──▶ edits Commands::Reject    (+ its spec, only_record_rejections branch)
+                          └──▶ adds Stage#close_stage! path, quorum satisfied_at, request advance
+```
+
 ---
 
-## 4. Tickets — M0 prerequisites
+## 4. Tickets — M0 prerequisites ✅ *all merged*
 
 ### M0-1 — Runtime and development dependencies
 **Spec:** §2 ("Runtime dependencies"), §15.6
 **Depends on:** —
 **Deliver:**
-- Gemspec runtime deps: `activerecord >= 7.1`, `activesupport >= 7.1`, `zeitwerk >= 2.6`, `railties >= 7.1`
+- Gemspec runtime deps: `activerecord`, `activesupport`, `railties`, `zeitwerk >= 2.6`
   (declared runtime; every `require "rails/…"` still behind `defined?(Rails::Engine)`).
 - Dev deps: `pg`, `rspec-rails`, `database_cleaner-active_record`, `activejob`. No `sqlite3`, deliberately.
 - `gemfiles/rails_8.1.gemfile` + `BUNDLE_GEMFILE` wiring, even with one matrix entry — M11 needs the shape.
@@ -107,6 +152,22 @@ M0-1 gemspec/deps ─┬─ M0-2 zeitwerk+prefix ─ M0-3 Configuration ─┬�
 
 **Acceptance:** `bundle install` resolves under Ruby 4.0.6; `rake ci` still green.
 **Est:** 0.5 d
+
+**As built:** the Rails floor is **`>= 8.1`, not `>= 7.1`.** §18 already cut the line at Rails 8.1, and a
+7.1-compatible declaration the suite never exercises is a claim, not a support promise. `json ~> 2.7` was
+added as a fourth runtime dependency (**Q16**), and a `# beware: json 3.0 is a breaking change` comment sits
+beside it because the failure mode - ActiveSupport calling `JSON.parse` positionally - surfaces nowhere near
+its cause. `nulls_not_distinct` (M1a-2, **I3**) needs Rails 7.2+ anyway, so 7.1 could never have shipped
+the schema this plan specifies.
+
+**R1 is closed:** Ruby 4.0.6 + Rails 8.1 resolve, boot and run the whole suite. No finding to report.
+
+**Two dev dependencies are declared and not yet used:** `database_cleaner-active_record` (the dummy app uses
+transactional fixtures instead, and the one spec that cannot - `headless` - builds and drops its own
+database) and `activejob` (nothing enqueues until M3b/M9b). **Both stay** (**Q39**): DatabaseCleaner gets its
+first user in M1b-15, whose specs cannot run inside a transaction, and ActiveJob gets one in M3b and again in
+M9b's `CloseStageJob`. `spec/gemspec_spec.rb` asserts both are present, so removing either would be a
+deliberate act rather than an oversight.
 
 ---
 
@@ -153,6 +214,19 @@ and without the engine loaded.
 **Acceptance:** `validate!` message specs; `config` never nil before `configure`; re-registering an actor
 type merges; assigning `requester_may_approve` raises `NoMethodError`, because the setting is absent.
 **Est:** 1 d
+
+**As built,** three things the ticket did not name:
+- **`Configuration#problems`** is public beside `validate!`, and `validate!` is one line over it. M2's
+  `verify!` needs to *collect* problems rather than raise on the first, and `Operation` was given the same
+  pair for the same reason. Every registered type contributes its own `problems`.
+- **`config.authorization = <lambda>` coerces**, wrapping a bare `->(actor:, request:, stage:, action:)` in
+  `Authorization::Callable` on assignment. §9.2 tells hosts to assign a lambda and the gem needs an object
+  answering `allows?`; doing the conversion in the writer means `validate!` reports only things that answer
+  neither. `Callable` itself was pulled forward from M1b-2 by this.
+- **`initialize_copy` deep-dups** the actor and tenant registries and the authorization object, because
+  `actor_type` reopens a registration in place - a shallow copy would share every mutation. M1b-0's spec
+  isolation (**Q13**) is built on this being a real copy, so the two tickets are coupled more tightly than
+  the graph shows.
 
 ---
 
@@ -226,12 +300,29 @@ the one check that must *not* run against this repository's bundle.
 **As built:** the checks were grouped into two jobs - one that needs PostgreSQL and one that does not -
 after seven separate jobs spent more time on checkout and `bundle install` than on checking anything.
 Isolation was not lost with them: `RSpec::Core::RakeTask` shells out to a fresh process per task, so
-`headless` is as Rails-free as a step as it was as a job.
+`headless` is as Rails-free as a step as it was as a job. `if: ${{ !cancelled() }}` on every step after the
+first keeps the failure overview the separate jobs gave.
+
+**Two security checks were named, because §15.6 only said "security checks":**
+- `rake brakeman` — `--force-scan` is mandatory on a gem: without it Brakeman refuses **and exits 0**.
+  `--exit-on-error --exit-on-warn` because a warning is exit 3 and would otherwise read as a pass. The
+  target is the gem root, not `spec/dummy`, which sees only fixture models. §6.12's dispatch constantizes a
+  stored string and calls a method on it, which is exactly the shape `UnsafeReflection` and `Send` exist for.
+- `rake bundle:audit` — wrapped in `tasks/bundle_audit.rb` rather than using the stock task, so it audits
+  the **active** gemfile's lockfile. With `BUNDLE_GEMFILE` pointed at `gemfiles/rails_8.1.gemfile`, the stock
+  task audits the wrong lockfile silently. `spec/tasks/bundle_audit_spec.rb` covers the command it builds.
+
+**`docs/adr/` also landed here** (#25): fourteen records covering the decisions the code has already made.
+They exist because this document records decisions *ahead of* the implementation and PLAN.md records the
+design, and neither answers "why is the shipped code like this" for someone reading the repository. The
+division is stated in `docs/adr/README.md`: an ADR describes the gem as it stands; PLAN.md holds decisions
+still ahead of the code. Keeping them in step is **maintainer-owned and outside this plan** (**Q40**): no
+ticket writes an ADR, and none of the five remaining tickets is blocked on one.
 **Est:** 0.5 d
 
 ---
 
-## 5. Tickets — M1a: schema and models
+## 5. Tickets — M1a: schema and models ✅ *all merged*
 
 > TDD per [AGENTS.md](AGENTS.md): failing spec first, `rubocop -A` on touched files, then `rake ci`.
 
@@ -310,6 +401,25 @@ Requirements:
 
 **Est:** 2 d
 
+**As built,** three additions the ticket's column lists did not carry:
+- **`change_requests.requester_identity`** — **Q17**, raised by M1b-1 and folded into M1b-4, but the column
+  had to be in this template. It is there.
+- **`change_request_stages.rejected_at`** — **missed here and back-filled in #34**, a separate PR between
+  M1b-8 and M1b-9. It is written from M9b and nothing reads it in M1, which is exactly why it was
+  overlooked: a column with no code behind it has nothing to fail. It belongs in the first migration because
+  every column not in it is a migration in every host application later, and that is the whole argument of
+  ADR-0009. It is the one place M1a-2's acceptance was not strong enough: the schema spec asserts the indexes
+  and constraints §5 names, and asserts nothing about columns §5 names that no model reads. **Decided
+  (Q38): leave it.** No column-list spec is added. A column nothing reads is a column nothing breaks, and
+  the miss cost one PR while the gem is unreleased — which is R3 behaving exactly as it was priced.
+- **Two indexes not in §5's list**: `change_request_quorum_permissions(permission)` and
+  `change_request_quorum_eligible_actors(actor_type, actor_id)`. Both are M9c's inbox query working
+  backwards - "which quorums is this actor eligible for" - and both are free now and a host migration later.
+
+**The acceptance held everywhere else.** `pg_indexes` / `pg_constraint` assertions caught two dropped
+constraints during M1a-4 and M1a-5, and the `NULLS NOT DISTINCT` assertion is the only thing standing
+between **I3** and a silently duplicated "any permission / any actor type" row.
+
 ---
 
 ### M1a-3 — `Request` model
@@ -331,6 +441,18 @@ Requirements:
 **Acceptance:** a spec per readonly column asserting a **raise**, not a silent no-op; terminal-state spec per
 final status × mutated column; a spec proving a `successful` request still accepts a new `Event`.
 **Est:** 1 d
+
+**As built:**
+- The `pending` / `approved` / `executing` / … scopes and the `pending?` / `approved?` / … predicates are
+  **generated by `Concerns::StringEnum`**, not written on `Request`. One `string_enum :status, STATUSES`
+  call produces a scope and a predicate per value and the inclusion validation; `Stage` and `Quorum` use the
+  same concern for theirs. It also owns assignment, raising rather than reporting a validation error — which
+  is what §5.7 wanted from a PG enum without the `ALTER TYPE` per value.
+- **`retryable?` was not delivered.** §8's "`approved`, or `failed` and retryable" needs it and nothing in
+  M1a reads it, so it fell between this ticket and M1b-11, which is where it now sits. It counts `attempts`
+  rows rather than a column (§19.12), which is why it is a `Request` method and not a guard helper.
+- `OPEN_STATUSES` was added beside `STATUSES` and `FINAL_STATUSES`, because `open` is `STATUSES -
+  FINAL_STATUSES` and writing that list twice is how the two drift.
 
 ---
 
@@ -452,6 +574,8 @@ table names) and the extension of the headless spec to migrate and create a requ
 
 ## 6. Tickets — M1b: operations, guards, commands, evaluation
 
+> **M1b-0 … M1b-10 are merged.** **M1b-11 … M1b-15 are the remaining work** and are the only tickets below still to be read as instructions rather than as history.
+
 ### M1b-0 — Minimal `Operations` and `Operation` (pulled forward from M2)
 **Spec:** §6.4, §6.12, §5.10; decision **D1**
 **Depends on:** M0-3
@@ -476,6 +600,33 @@ object, not the database (**Q14**; M1b-4 asserts the rows). A missing `version` 
 at declaration time; an unknown key returns nil so guards can detect the undeclared case (§5.11). A spec
 registers an actor type and an operation, and a second spec sees neither.
 **Est:** 1 d
+
+**As built:**
+- **`ChangeRequests::Workflow` came back**, and **I10** needs re-reading because of it. I10 removed
+  `workflow.rb` from the §2 layout on the grounds that two constants called `Workflow` - an evaluator and a
+  declaration DSL - is one too many. That is still true, and the evaluator is still
+  `Commands::EvaluateWorkflow`. But **Q18** then made the description objects public so M1b-4 could be
+  specced without M2's DSL, and a description needs a name. `Workflow`, `Workflow::Stage`,
+  `Workflow::Quorum` and `Workflow::Permission` are `Data.define` value objects under `lib/change_requests/`.
+  The name is reused, the collision is not: nothing evaluates anything in that file.
+- **`Operation#validate!` / `#problems`** mirror `Configuration`'s pair, and `Operations#define` calls
+  `validate!` after yielding. The ticket only asked for a missing `version` to raise.
+- **`op.approvals` refuses three more misconfigurations** than the ticket named, all at declaration time
+  with `ConfigurationError`: no `permissions:`, `actor_type:` *or* `eligible_actors:` (a quorum nobody
+  qualifies for can never be satisfied, and the request would sit pending until it expired); `required:`
+  that is not an integer ≥ 1; and a `match:` outside `:any` / `:all`. These are M2's `verify!` work arriving
+  early, and they arrived early because the alternative was materialising an unsatisfiable workflow in
+  M1b-4 and discovering it in a spec that timed out.
+- **`Workflow::Quorum#permission_match` and `Operation#max_attempts` / `#expires_in` resolve lazily** against
+  `ChangeRequests.config`. Initializer order is the host's, and an operations file that loads before the
+  configuration file must still see the host's defaults. `expires_in` distinguishes "never set" from "set to
+  nil" with a separate flag, because `nil` there means *this operation never expires*, whatever the
+  host-wide default says.
+- **Spec isolation is copy-and-restore, not snapshot-and-restore** (**Q13**). `spec/support/global_state.rb`
+  installs a `dup` of both memos around every example and puts the originals back after. Restoring a
+  *snapshot* would have meant deep-copying on the way out instead of on the way in; copying on the way in
+  means the original objects are never touched at all. It works only because `Configuration#initialize_copy`
+  and `Operations#initialize_copy` are real deep copies (see M0-3).
 
 ---
 
@@ -509,6 +660,12 @@ registers an actor type and an operation, and a second spec sees neither.
 actor classes, table-driven, with the table structured so M9c can drop the SQL in as a second subject.
 `NULL/NULL` never matches.
 **Est:** 1 d
+
+**As built:** the predicate lives on `Authorization::Permissions` as specified, and `Guards::Base#qualifying`
+is the single caller — every guard that asks "is this actor an eligible approver" goes through it, so there
+is one place for M9c to compare its SQL against. The table is `spec/support/eligibility_examples.rb`, shared
+between the authorization spec and the guard specs. `Authorization::Callable` shipped early with M0-3's
+`authorization=` coercion (see there).
 
 ---
 
@@ -558,6 +715,54 @@ eligible-actor rows they describe** (moved here from M1b-0, **Q14**); editing th
 changes nothing on the in-flight request; a non-object payload raises; an actor type without `may_request`
 raises `NotAuthorized`.
 **Est:** 1 d
+
+**As built:**
+- **There is no `Guards::Create`**, and §7.2's table has a `Create` row. `Commands::Create` does the three
+  checks inline: `UnknownOperation` for a missing declaration, `ConfigurationError` for an incomplete one,
+  `NotAuthorized` for a class without `may_request`. The reason is structural — `Guards::Base` is
+  `(request:, actor:)` and at create time there is no request.
+- **`:may_not_request` is in `Guards::Base::REASONS` and nothing raises it.** `Commands::Create` raises
+  `NotAuthorized` with a *message* and no `reason:`, so the symbol is unreachable and
+  `NotAuthorized#reason` is nil on that path.
+
+#### Decided (Q34) — raise the symbol here; the predicate is M6a's
+
+**Edit `Commands::Create#refuse_unless_may_request`** to raise
+`NotAuthorized.new(request: nil, reason: :may_not_request)`. `Refusal#initialize` already takes `reason:`
+with a nil `request:`, and its `translated_message` falls back to the symbol, so the existing message can go
+or stay as the first positional argument. One spec asserts `error.reason == :may_not_request`. This is the
+whole of the M1 change, and it is what makes M1b-13's enumeration honest.
+
+**No `Guards::Create` is built, in M1 or later.** A guard answers "may this actor do X *to this row*" and is
+`(request:, actor:)` because of it. Create has no row, so a Create guard would either carry a second
+signature — and `Guards::Base`'s one shape is what lets `spec/support/guard_examples.rb` run the same
+example against every guard — or take a nil request and spend every branch defending against it. The
+question is real; it is simply not a guard-shaped question.
+
+**What M6a builds instead: `Operation#requestable_by?(actor)`.** §7's rule is that a presenter and a command
+must not disagree, and for "raise a request" the thing they must agree on is a property of the *operation*
+plus the actor's registered type — no request involved:
+
+- the operation is declared (`ChangeRequests.operations[key]` is not nil),
+- it is complete — a `service`, and a non-empty workflow,
+- the actor's registered type declares `may_request`.
+
+Those are exactly the three checks `Commands::Create` runs today, in the same order. **The predicate and the
+command must read one implementation, not two**, or they drift into the disagreement §7 exists to prevent:
+`refuse_incomplete` already collects its problems rather than raising on the first, so the natural shape is
+for the completeness half to move onto `Operation` beside `#problems` — which is where M2's `verify!` needs
+it anyway — and for both `Commands::Create` and `requestable_by?` to call it.
+
+Deliberately **not** built in M1: nothing consults it before M6a, and M2's `verify!` will reshape
+`Operation#problems` first. Recorded here so M6a inherits the decision rather than reopening it, and so M2
+knows the completeness check has a second caller coming.
+- `Create` overrides `around_perform` with `Record.transaction` rather than `with_lock`: there is no row to
+  lock until it has written one, and the request plus its whole stage/quorum/permission/eligible-actor graph
+  has to be all-or-nothing.
+- **Eligible actors resolve to `(type, id)` here, not in the declaration.** `Workflow::Quorum` keeps the
+  actor objects as the host wrote them, because resolving them would call `actor_attributes` from an
+  initializer — before the file registering the actor types has necessarily run. `materialise_quorum` is
+  where an unregistered class is finally refused.
 
 ---
 
@@ -616,6 +821,14 @@ The `EvaluateWorkflow` re-run lands with M1b-12 (**Q22**).
 unapproval by a different actor raises `NotUnapprovable`.
 **Est:** 0.5 d
 
+**As built:** `Guards::Unapprove#decision` looks for the actor's row **on the current stage first and falls
+back to their most recent row anywhere on the request**. The fallback is there for the refusal wording, not
+for the retraction: an actor who decided on a stage that has since closed gets `:stage_not_open` — "too
+late" — rather than `:not_the_approver`, which would be a lie. The command only ever destroys whatever
+`decision` returned, and the `:stage_not_open` branch stops it before that on every closed-stage path.
+M9b widens "reversible" to `satisfied` and `rejected` within cooldown; both are still the *current* stage,
+because `close_stage!` is what advances the position, so the lookup does not change.
+
 ---
 
 ### M1b-7 — `Guards::Reject` + `Commands::Reject`
@@ -643,6 +856,14 @@ unique index guarantees the rejector cannot later approve that stage.
   statements, and M9b puts the window between them rather than restructuring the command.
 **Acceptance:** both config branches; a missing reason raises; a second decision from the same actor raises.
 **Est:** 0.5 d
+
+**As built,** and this is the finding that matters most for M1b-12: **at cooldown `0` the stage rejection
+and the request rejection are two statements inside one lock, and nothing can ever observe the state
+between them.** `Commands::Reject#stop` sets `stage.status = "rejected"` then `request.status = "rejected"`.
+The request is now final, so `Guards::Unapprove` refuses with `:not_pending`, so the rejection cannot be
+withdrawn. Under `only_record_rejections` the stage is never rejected at all. Between them, those two
+branches mean **no sequence of public calls in M1 can produce a `pending` request whose current stage is
+`rejected`** — which is the only state EvaluateWorkflow's step 0 exists to handle. See M1b-12 and **Q35**.
 
 ---
 
@@ -689,6 +910,12 @@ no live declaration exists, `emit` stamps the request's creation-time `operation
 operation has been removed from the registry.
 **Est:** 0.25 d
 
+**As built:** the exemption is a class-level declaration, `exempt_from_undeclared_operation!`, read by
+`Guards::Base#reason` — so the rule stays in the base and `Comment` states that it opts out, rather than
+the base naming `Comment`. `spec/support/guard_examples.rb` runs the same example for every guard and
+branches on the flag, so each guard reports the exemption it actually has instead of one of the pair being
+skipped.
+
 ---
 
 ### M1b-10 — `Guards::Expire` + `Commands::Expire`
@@ -715,20 +942,64 @@ the emitted event carries the sentinel actor.
 
 ### M1b-11 — `Guards::Execute` (guard only)
 **Spec:** §7.2, §8; decision **D2**
-**Depends on:** M1b-3
+**Depends on:** M1b-3 ✅
 **Deliver:** the guard's approval-state and separation-of-duties branches — request `approved` (or `failed`
-and retryable), `config.requester_may_execute` / `approver_may_execute`, operation declared. `retryable?`
-counts `attempts` rows, not a column (§19.12). **`Commands::Execute`, claim-then-invoke and the §8.1
-override branch are M3a** and are not built here; §17 has been amended to say so.
-**Acceptance:** guard truth table over statuses × actor roles; a spec documents that `Commands::Execute` is
-intentionally absent at 0.2.0.
-**Est:** 0.5 d
+and retryable), `config.requester_may_execute` / `approver_may_execute`, operation declared. **`Commands::Execute`,
+claim-then-invoke and the §8.1 override branch are M3a** and are not built here; §17 has been amended to say so.
+
+**Sharpened against the built guards.** Everything this ticket needs exists except two pieces:
+
+1. **`Request#retryable?` has to be written here.** M1a-3 did not deliver it (see there). It counts
+   `attempts` rows, not a column (§19.12): `attempts.count < max_attempts`. `max_attempts` is readonly after
+   create and `>= 1` by CHECK, so there is no zero case to defend against. Put it on the model, not the
+   guard — M3a's `Commands::Execute` and M3b's reaper both read it.
+2. **Two reason symbols are already reserved and unused:** `:not_approved` and `:attempts_exhausted` sit in
+   `Guards::Base::REASONS` waiting for this guard. Use them; do not invent new ones.
+
+**Branch order**, following the built guards' convention that order decides which reason a user sees:
+
+```
+:operation_undeclared   (Guards::Base, free)
+:already_finalized      (request.final?  → the shared REASON_ERRORS mapping, Q29)
+:not_approved           (status is neither `approved` nor `failed`)                       ← Q34
+:attempts_exhausted     (failed, but attempts.count >= max_attempts)
+:not_permitted          (the actor's registered type declares may_execute = false)        ← Q35
+:requester              (same_person?(request.requester, actor) and not config.requester_may_execute)
+:not_permitted          (an approver on this request, and not config.approver_may_execute)
+```
+
+**Q34.** The original parenthetical for `:not_approved` — "not approved, and not (failed and retryable)" —
+swallowed the exhausted-retry case and left `:attempts_exhausted` unreachable, contradicting the rationale
+below it. `:not_approved` is the status question only; `:attempts_exhausted` is the ceiling question.
+
+**Q35.** `config.actor_type … t.may_execute` (§9.1, default `true`) had no reader anywhere. It is checked
+here, before the separation-of-duties branches, the way `may_approve` is checked inside
+`Authorization::Permissions` — otherwise a class declared unable to execute would still pass the guard a
+presenter consults.
+
+`:already_finalized` earns its place before `:not_approved` because `successful` is final and "already done"
+is a better answer than "not approved". `:attempts_exhausted` is split from `:not_approved` so a host can
+tell a retry that ran out from a request that was never approved.
+
+`refuses_with NotExecutable` — the class exists in the taxonomy and nothing raises it yet.
+
+**Separation of duties is the one part with no precedent in the merged guards.** `Approve` refuses the
+requester by identity and consults no setting (**I5**); `Execute` refuses the requester *unless*
+`config.requester_may_execute`, which defaults to `false`. Use `same_person?` for it, the same helper, so
+the two rules answer "is this the same human" identically — including through `config.actor_identity`.
+"An approver on this request" means they wrote a row in `change_request_approvals`, not that they are
+*eligible* to: `approver_may_execute` is about who actually decided, and it defaults to `true`.
+
+**Acceptance:** guard truth table over statuses × actor roles × both separation-of-duties settings; a
+`failed` request at and below its attempt ceiling; a spec documents that `Commands::Execute` is
+intentionally absent at 0.2.0, so a reader of the 0.2.0 gem finds the gap stated rather than inferred.
+**Est:** 0.5 d — unchanged; `retryable?` is a method and its spec.
 
 ---
 
-### M1b-12 — `Commands::EvaluateWorkflow`
+### M1b-12 — `Commands::EvaluateWorkflow` ⬜ **outstanding — the ticket that closes the loop**
 **Spec:** §7.1; decisions **D5**, **I10**
-**Depends on:** M1b-5
+**Depends on:** M1b-5 ✅, M1b-6 ✅, M1b-7 ✅ — **it edits all three**
 **Deliver:** the evaluation command — an internal command with no actor, invoked only from `Approve`,
 `Unapprove` and `Reject`, inside their lock. Named `ChangeRequests::Commands::EvaluateWorkflow`, replacing
 the free-floating `advance_workflow!` and `lib/change_requests/workflow.rb` of the original §2 layout.
@@ -751,40 +1022,138 @@ value and costs one query — what M9b adds is the window between stopping the s
 request, plus `rejected_at`, `CloseStageJob` and the `:stage_rejected` guard reason that only becomes
 reachable once the window is non-zero.
 
+**Three merged commands change with it.** Each holds a placeholder comment where the call goes, and each of
+their specs asserts today's non-advancing behaviour. Those assertions are not regressions to preserve; they
+are scaffolding to remove, in this change set:
+
+| Call site             | Where                                         | What the call does                                              |
+|-----------------------|-----------------------------------------------|-----------------------------------------------------------------|
+| `Commands::Approve`   | after `emit(:approved, …)`, inside the lock   | recount, possibly close the stage and advance or approve        |
+| `Commands::Unapprove` | after `emit(:unapproved, …)`, inside the lock | recount; a quorum that lost its threshold clears `satisfied_at` |
+| `Commands::Reject`    | the `only_record_rejections` branch **only**  | the workflow continues, so the stage may still be satisfied     |
+
+`Commands::Reject`'s default branch does **not** call it: `stop` has already set the request `rejected`,
+and re-entering evaluation on a final request is at best a wasted query. Its own comment says as much today.
+
+**Step 0 has no reachable path in M1, and the ticket has to say so rather than discover it in a spec.**
+§7.1 step 0 handles a `pending` request whose current stage holds a standing rejection. At cooldown `0` —
+all of M1 — `Commands::Reject` writes the stage rejection and the request rejection in the same lock
+(M1b-7), so that state never exists; under `only_record_rejections` no stage is ever rejected. Step 0 is
+therefore **correct, cheap, and unreachable through the public API until M9b**. **Decided (Q35): ship it
+now** — it is correct at every cooldown value, costs one query, and M9b extends this command rather than
+rewriting it. Two consequences to honour:
+- **spec it by writing the stage status directly**, and say in the spec that the state is unreachable
+  through the commands in M1. A spec that looks like it drives a public path but does not is worse than one
+  that admits what it is doing.
+- do **not** add `rejected_at` writes here. The column exists (M1a-2) and M9b owns it, together with
+  `CloseStageJob`, the window, and the `:stage_rejected` guard reason that only becomes reachable with it.
+
+**What `close_stage!` owns.** §7.1 gives it four writes and the built code has none of them yet:
+`closed_at` + status `closed` on the stage; `satisfied_at` + status `satisfied` on each quorum that met its
+threshold; **one `quorum_satisfied` per such quorum, then one `stage_satisfied`** (**Q41**); then
+`current_stage_position + 1`, or the request to `approved` when no stage remains.
+
+**`stage_closed` no longer exists** — it was declared in `Event::KINDS`, emitted by nothing, and is removed
+(**Q41**). M9b adds it back if `op.cooldown` ever puts a window between satisfaction and closing. Emit the
+pair even for a single-quorum stage: the two kinds answer different questions, and branching on quorum count
+here is how the multi-quorum case in M9a ends up with its own code path. Both events go through `Commands::Base#emit`, which stamps the
+`SYSTEM_ACTOR` triple when `actor` is nil — and an evaluation triggered by an approval has no actor of its
+own, so **these events are attributed to System.** **Decided (Q36): that is correct, and no actor is
+threaded through.** Closing a stage is the gem's own act, not the approver's; the approvals that caused it
+are already in the trail, each with its own actor, so a timeline reading "System closed the stage" sits
+directly beneath the rows naming everyone who approved. Consistent with §19.15 and with `Expire`. M5 and M6b
+render it that way rather than attributing the close to the last approver.
+
+**`stage_satisfied` names the quorum that closed it** (§7.1). With one nameless quorum per stage there is
+no name to give, so follow `Commands::Approve#metadata_for`: omit the key rather than emit a null.
+
 **Acceptance:** 1-of-1, 2-of-N and N-of-N single-quorum stages; a three-stage sequential workflow reaching
 `approved` only after the last stage closes; an approval landing on a non-current stage refused; a quorum
 losing its threshold via unapproval clearing `satisfied_at` and keeping the request `pending`; an approval
-on a closed stage raising.
-**Est:** 1.25 d
+on a closed stage raising; **the `only_record_rejections` branch advancing past a rejected-but-recorded
+decision**; **step 0 driven by a directly-written stage status, labelled as such**; and the three edited
+command specs no longer asserting that nothing advances.
+**Est:** 1.25 d → **1.5 d**, for the three call sites and their specs.
 
 ---
 
-### M1b-13 — Reason vocabulary and i18n
+### M1b-13 — Reason vocabulary and i18n ⬜ **outstanding**
 **Spec:** §7, §5.9
-**Depends on:** M1b-5 … M1b-11
+**Depends on:** M1b-5 ✅ … M1b-11
 **Deliver:** `config/locales/en.yml` with every guard reason and `TransitionError` message, plus the
 `change_requests.stages.*` / `change_requests.quorums.*` namespaces. Messages must work with I18n absent
 (headless), falling back to the symbol.
+
+**Sharpened: the lookup side already shipped; only the locale file is missing.**
+- **`ChangeRequests::Translation`** is the single lookup path — `translate(key, default:)`, with
+  `available?` guarding on `defined?(I18n)`. Every caller passes a usable default, which is why the suite is
+  green with no locale file at all and why the headless spec can assert
+  `error_message=requester`: with nothing to look up, the message *is* the reason symbol.
+- **The keys are already fixed by the code.** `Refusal::I18N_SCOPE` is `"change_requests.errors"` and
+  `Refusal#i18n_key` is `"change_requests.errors.#{reason || error_key}"`, where `error_key` is the error
+  class underscored (`NotApprovable` → `not_approvable`) for the callers that raise without a reason. So the
+  file needs **one key per entry of `Guards::Base::REASONS`** plus **one per `Refusal`-including error
+  class** as the no-reason fallback. `Stage#label` and `Quorum#label` already read
+  `change_requests.stages.<name>` / `change_requests.quorums.<name>` with a `humanize` fallback.
+- **The engine has to add the load path.** Nothing does today: `config/` holds only `routes.rb`, and
+  `config/locales` does not exist. `spec/integration/packaging_spec.rb` has a **pending** example for it
+  that turns green the moment the directory does — that pending is this ticket's tripwire, so do not delete
+  it, satisfy it.
+- **Every entry of `REASONS` will have a raiser by the time this lands.** `:not_approved` and
+  `:attempts_exhausted` become reachable with M1b-11; `:may_not_request` becomes reachable with M1b-4's
+  one-line amendment (**Q34**). If M1b-4 has not been amended when this ticket starts, amend it here — the
+  enumeration below is what makes the gap visible, and it is two words.
+
 **Acceptance:** a spec enumerates every reason symbol raised anywhere in the suite and asserts a translation
-exists, so a new reason cannot ship untranslated.
+exists, so a new reason cannot ship untranslated — **and the reverse**, that every entry of `REASONS` is
+either raised somewhere or deliberately absent with a note, so the vocabulary cannot accumulate dead
+symbols. The headless spec keeps asserting the bare-symbol fallback, because a locale file now existing must
+not become a thing the domain core needs.
 **Est:** 0.5 d
 
 ---
 
-### M1b-14 — Guard truth tables and command specs
+### M1b-14 — Guard truth tables and command specs ⬜ **outstanding — but most of it is already paid for**
 **Spec:** §15.2
 **Depends on:** all M1b
 **Deliver:** one table-driven spec per guard — guard × status × actor role, one row per case (§15.2).
 Command specs cover happy path, every guard rejection, event emission and workflow advancement. Extend the
 headless spec to create → approve → `approved`.
-**Acceptance:** every cell present; `rake ci` green.
-**Est:** 1 d
+
+**Sharpened: this ticket was written as if the guards would arrive untested, and they did not.** TDD per
+[AGENTS.md](AGENTS.md) meant every guard and command shipped with its own spec file, one per reason branch —
+roughly 240 examples across `spec/change_requests/guards/` and `spec/change_requests/commands/`, plus
+`spec/support/guard_examples.rb` (the §5.11 exemption, run against every guard) and
+`spec/support/eligibility_examples.rb` (M1b-2's 2×2). What is left is the part per-ticket TDD structurally
+cannot produce:
+
+1. **The headless extension — create → approve → `approved`.** This is DoD item 5 and the only one of the
+   six that is nobody else's ticket. `spec/integration/headless_script.rb` today creates a request and
+   hand-builds a stage and a quorum with `create!`; it never loads a command. Rewrite that half to
+   `Commands::Create` → `Commands::Approve` → assert `approved`, which also makes it the first proof that
+   the command layer needs no Rails. **It cannot be written before M1b-12**, because nothing reaches
+   `approved` until then.
+2. **Cross-guard consistency, which a per-guard spec cannot see.** One table over *every* guard × status ×
+   actor role, asserting that the same situation gets the same reason from each guard that has an opinion
+   about it. The branch orders were chosen deliberately to line up — `Reject` mirrors `Approve` so "not your
+   turn yet" reads the same — and nothing currently fails if one of them drifts.
+3. **Nothing for the `emit` invariant — it shipped with M1a-7.** `spec/change_requests/event_spec.rb`
+   proves it by **scanning the source** rather than the exercised paths: it greps every file under `lib/`
+   for an event write and asserts `Commands::Base#emit` is the only match, with two companion examples
+   proving the scan covers the tree and that the pattern matches the write it guards. That is stronger than
+   M1b-3's runtime wording, and it means **M1b-12's `quorum_satisfied` and `stage_satisfied` events must go
+   through `emit` or the spec fails** — which is the right failure.
+
+**Acceptance:** headless reaches `approved` with `Rails` undefined; the cross-guard table has every cell;
+`rake ci` green.
+**Est:** 1 d → **0.75 d**, since the per-guard tables landed with their tickets.
 
 ---
 
-### M1b-15 — Concurrency regression specs (the M1 subset)
+### M1b-15 — Concurrency regression specs (the M1 subset) ⬜ **outstanding**
 **Spec:** §15.3
-**Depends on:** M1b-14
+**Depends on:** M1b-14, and **hard on M1b-12**: races 1 and 3 are about stage *transitions*, and nothing
+transitions a stage until EvaluateWorkflow lands
 **Deliver:** the races M1's code can actually lose — the execution races are M3a's:
 1. Two concurrent approvals racing the last slot of a quorum: exactly one transitions the stage.
 2. The same actor approving twice concurrently: `RecordNotUnique` surfaces as `NotApprovable`, not a 500.
@@ -792,7 +1161,27 @@ headless spec to create → approve → `approved`.
 
 Real threads, real connections, real PostgreSQL. Needs a minimal `Testing.in_parallel(n)`; the full host
 test kit is M8.
-**Acceptance:** each spec fails when `with_lock` is removed — prove the test has teeth.
+
+**Sharpened: the suite's default isolation is the obstacle.** Every other spec runs inside a transaction
+that is rolled back, and a second thread on a second connection cannot see uncommitted rows — so these three
+examples have to opt out of transactional fixtures and clean up after themselves, the way
+`headless_script.rb` already does by building and dropping its own database. That is the reason
+`database_cleaner-active_record` is in the gemspec and unused (M0-1): **this is its first user** (**Q39**).
+Truncation between examples, scoped to the examples that opted out — the rest of the suite keeps its
+transaction and never pays for it.
+
+`spec/support/global_state.rb` installs a `dup` of the config and operations memos per example, on the main
+thread. Spawned threads read the same module-level ivars, so they see the copy — but a thread that mutates
+config would be mutating the example's copy from under the main thread. Race specs should register what they
+need before spawning and treat the registry as read-only inside the threads.
+
+Race 2 — the same actor approving twice — is the only one of the three that is **testable today**:
+`Commands::Approve` already declares `on_conflict NotApprovable, reason: :already_decided`, and the unique
+index already enforces it. It can be written before M1b-12 and is the cheapest proof that
+`Testing.in_parallel(n)` works at all.
+
+**Acceptance:** each spec fails when `with_lock` is removed — prove the test has teeth. Removing
+`on_conflict` from `Commands::Approve` must turn race 2 into a `RecordNotUnique`, not a pass.
 **Est:** 0.75 d
 
 ---
@@ -824,40 +1213,67 @@ Schema and behaviour answers, all now in PLAN.md:
 
 ---
 
-## 8. Open questions
+## 8. Questions raised during the build
 
-**None.** The M1a review on 2026-09-11 raised three; all are answered and folded into the tickets they
-affect - M1b-0 for Q13 and Q14, M1b-6 for Q15.
+**None are open.** Q34–Q40 were found by reviewing the merged code against this document on 2026-09-11 and
+answered the same day; Q41 was found while checking which of those answers PLAN.md had to carry, and
+answered with them. Q11–Q33 were raised during M1a and M1b-1…M1b-10. Every answer is folded into the ticket
+it affects.
 
-| ID      | Question                                                                                                                      | Answer                                                                                                                                                                                                                                      |
-|---------|-------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q11** | Does `Create` need a dedupe story now that `idempotency_key` is gone? Two identical submissions produce two pending requests. | **No, and it is not documented.** Rails developers know how to prevent accidental double submission, and a deliberate duplicate is a legitimate request that the approvers can cancel. Neither the README nor PLAN.md explains it.          |
-| **Q12** | `SYSTEM_ACTOR` used `id "0"`, which a string-keyed host actor could legitimately hold.                                        | **Use the non-castable sentinel `"system"`.** §5.5 and §19.15 updated; tickets M1a-7, M1a-9 and M1b-10 follow.                                                                                                                              |
-| **Q16** | Should the gem constrain `json` for hosts, or keep it a development pin? Raised by M1a-1.                                     | **Constrain it.** `spec.add_dependency "json", "~> 2.7"`. A `gemspec` directive in a Gemfile pulls runtime dependencies in too, so this pins the gem's own suite *and* every host - which a development pin never could. See §2 and §19.18. |
-| **Q13** | Spec-level config isolation: `ChangeRequests.config` is memoised module state, and a mutation in one example is visible in the next - confirmed by probe. `ChangeRequests.operations` adds a second global. | **A `spec/support` helper that snapshots and restores both**, shipped with M1b-0. Same shape as the two order-dependent failures already hit. |
-| **Q14** | M1b-0's acceptance required M1b-4's code: a registry can only *describe* a workflow, not materialise one.                     | **M1b-0 asserts the description; the materialisation assertion moves to M1b-4.**                                                                                                                                                            |
-| **Q15** | `ApprovalQuorum` is `Immutable`, so `approval.quorums.destroy_all` raises `ReadOnlyRecord`.                                    | **Unapprove deletes the approval and lets the database cascade remove the links.** The obvious code is the wrong code, so M1b-6 says so.                                                                                                    |
-| **Q17** | §9.4 uses `config.actor_identity` for the requester-cannot-approve rule, but only approvals carried an identity column. Raised by M1b-1. | **Add `requester_identity` to `change_requests`**, snapshotted by `Commands::Create`. Deferring it would need a second migration for hosts that had already installed. See §5.1 and §9.4. |
-| **Q18** | M1b-4's acceptance wanted a multi-stage operation, but `op.workflow` is M2.                                                   | **Build the `Workflow` description by hand in the spec.** The description objects are public value objects, so the materialiser's multi-stage path is proved now; M2 adds only the DSL that produces such a description. |
-| **Q19** | An operation could be declared with no `op.approvals`, producing a request with no stages that could never be approved.        | **`Commands::Create` refuses it**, with `ConfigurationError`, alongside a missing `service`. An approval gate with no approvers is a misconfiguration, not a fast path. |
-| **Q20** | §7's `:stage_not_current` branch compares the current stage with itself. What does it actually test?                          | **Eligible for a quorum on another stage of this request, but not the current one** — §6.9's stage-three director. |
-| **Q21** | Should `:already_decided` honour `config.actor_identity`?                                                                     | **Yes.** §9.4 uses the identity in place of `(type, id)` when counting distinct approvers, and deciding a stage twice is that same question. |
-| **Q22** | M1b-5 is specified to call `Commands::EvaluateWorkflow`, which is M1b-12.                                                      | **The call lands with M1b-12**, together with the advancement specs. M1b-5's own acceptance asks only for the approval, the links and one `approved` event. |
-| **Q23** | Should Unapprove honour `config.actor_identity`, letting one human retract through a second actor class?                       | **No.** §9.4 names two uses for the identity and retraction is neither; only the actor who wrote the row may take it back. |
-| **Q24** | May Unapprove delete a `rejected` row, or approvals only?                                                                      | **Either decision.** Unapprove is "take back my decision on this stage". The default short-circuit makes the request final, so this is reachable through `config.only_record_rejections`. |
-| **Q25** | Where does Reject's mandatory reason belong, given §7 has the presenter consult the same guard?                                | **In the command.** A guard refusing without a reason could never let the button that collects one appear. |
-| **Q26** | Does the default (short-circuiting) rejection branch also write an approvals row, or only the event?                          | **Always write the row**, so the table tells one story and the unique index behaves the same either way. |
-| **Q32** | Expire's refusals mix an authorization answer (`:not_system`) with state answers, but `refuses_with` names one class and there is no `NotExpirable`. | **`NotAuthorized` for all of them**, plus the shared `:already_finalized` mapping. Expire is internal; its guard is a floor beneath M3b's query, not a flash. |
-| **Q33** | §7.2 permits Expire when `pending` **or** `approved`, so `:not_pending` would misname the refusal for `executing` and `failed`. | **Add `:not_expirable`** to the shared vocabulary. |
-| **Q30** | §7.2 says Comment is permitted "always" and never calls its body mandatory. Blank body — refuse or record? | **Refuse**, with `:body_required`. An empty comment is permanent noise in an append-only trail. |
-| **Q31** | `Guards::Base#check!` passes `request:`/`reason:` to the declared error class, but `NotAuthorized` was a plain `Error` and silently swallowed both. Found by M1b-9, the first guard to declare it. | **Extract `Refusal` from `TransitionError` and include it in `NotAuthorized` too.** Ancestry untouched; Create's message-only `fail NotAuthorized, "…"` still works. |
-| **Q28** | §7.2 permits Cancel in any non-final status, which includes `executing` — where the target is actually running. | **Refuse while `executing`.** A status change cannot recall it, and a terminal status would leave the execution unable to record its outcome. Narrower than §7.2's wording, recorded there. |
-| **Q29** | The acceptance wants `AlreadyFinalized`, but `refuses_with` names one error class per guard.               | **`Guards::Base` maps `:already_finalized` to `AlreadyFinalized`** for every guard; everything else raises the declared class. |
-| **Q27** | A mistaken approval is retractable; a mistaken rejection killed the request outright, and `only_record_rejections` — whose purpose is to *not* stop anything — was the only mode where taking it back worked. | **Extend `op.cooldown` to rejection in M9b.** A rejection stops the stage at once and finalises the request only after the window, so `Unapprove` has something to undo. A stage with a standing rejection can never be satisfied; withdrawing the last one returns it to `pending`. At cooldown `0` nothing about M1 changes. See §5.2, §7.1, §7.2 and §19.20. |
+The seven existed because the last three tickets each met their decision at implementation time instead of
+having it collected in advance. Collecting them was the point of the revision; the answers below are what
+the remaining five tickets are built on.
+
+### 8.1 Raised by this revision
+
+| ID      | Question                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Bearing on                |
+|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------|
+| **Q34** | **Is there a `Guards::Create`, and does `:may_not_request` survive?** Every guard is `(request:, actor:)` — "may this actor do X to this row". `Create` has no row yet, so it got no guard: `Commands::Create` checks `may_request` inline and raises `NotAuthorized` with a message and **no `reason:`**. Two consequences: `:may_not_request` sits in `Guards::Base::REASONS` unraisable, which M1b-13's locale spec would hit; and M6 has no guard to consult before rendering a "raise a request" button, which is the one thing §7 says a guard is for. | **ANSWER: neither a `Guards::Create` nor dropping the symbol. Raise the symbol now; add a plain predicate when M6 needs one.** `Commands::Create` raises `NotAuthorized.new(request: nil, reason: :may_not_request)` — `Refusal#initialize` already accepts a nil request, so it is a two-word change and the symbol becomes real. `Guards::Base` keeps one signature. The presenter half is **M6a's**, answered by `Operation#requestable_by?(actor)` rather than by a guard: it needs no request, so it is not a guard-shaped question. See M1b-4. | M1b-4 (edit), M1b-13, M6a |
+| **Q35** | **Does EvaluateWorkflow's step 0 ship unreachable, or wait for M9b?** In M1 no public call sequence produces the state it handles: at cooldown `0` `Commands::Reject` writes the stage and request rejections in one lock, and under `only_record_rejections` no stage is ever rejected. | **ANSWER: ship it now.** It is correct at every cooldown value and costs one query, and M9b extends the command rather than rewriting it. The branch having no reachable path for a milestone is accepted; its spec drives the stage status directly and says so. | M1b-12 |
+| **Q36** | **Who is the actor on `quorum_satisfied` and `stage_satisfied`?** `Commands::Base#emit` stamps `SYSTEM_ACTOR` when `actor` is nil, and EvaluateWorkflow is an internal command with no actor — so a stage closed by a human's approval is attributed to System. | **ANSWER: System is correct.** Closing a stage is the gem's own act, not the approver's; the approvals that caused it are already in the trail, each with its own actor. No actor is threaded through. | M1b-12, M5, M6b |
+| **Q37** | **When does the version get bumped, and when does the CHANGELOG get written?** `VERSION` has been `0.2.0` since mid-M1a while `CHANGELOG.md` still ends at 0.1.0. | **ANSWER: neither matters until there are installations.** DoD item 6 is struck. It returns as a real gate at M11, the release milestone. | DoD 6, M11 |
+| **Q38** | **What makes a column that no code reads fail CI?** `rejected_at` was missed from the install template and caught by eye rather than by a spec. | **ANSWER: nothing, and that is fine.** No column-list spec. The schema spec keeps asserting indexes and constraints; a column nothing reads is a column nothing breaks, and R3 is cheap while the gem is unreleased. | M1a-2 / M1a-10 |
+| **Q39** | **Do `database_cleaner-active_record` and `activejob` stay?** Both are declared and used by nothing. | **ANSWER: both stay.** ActiveJob has users in M3b and M9b; DatabaseCleaner has one in M1b-15, whose specs cannot run inside a transaction. Neither is removed. | M1b-15, M0-1 |
+| **Q40** | **What keeps `docs/adr/` and PLAN.md in step?** Nothing enforces the handover from a planned decision to an accepted record. | **ANSWER: out of scope for this plan.** The maintainer keeps them in step by hand. No ticket, no process, and R6 is withdrawn. | process |
+| **Q41** | **Which events does `close_stage!` emit?** `Event::KINDS` carried `quorum_satisfied`, `stage_satisfied` **and** `stage_closed`; PLAN.md §7.1 emitted only `stage_satisfied`; this document's M1b-12 emitted two; and **nothing anywhere emitted `stage_closed`** - dead vocabulary of exactly the shape **Q34** removed. | **ANSWER: two events, and `stage_closed` is gone.** `close_stage!` emits one `quorum_satisfied` per quorum that met its threshold, then one `stage_satisfied`. The two answer different questions - a counting rule was met, versus the stage is over - and under `all_quorums` the first happens repeatedly before the second, so the multi-quorum case reads correctly from the same code. At cooldown `0` satisfaction and closing are the same instant, so a third kind would record it twice; **M9b adds `stage_closed`** if the window ever makes the distinction carry information. Applied: PLAN.md §5.5 and §7.1, and `Event::KINDS`. | M1b-12, PLAN §5.5 / §7.1 |
+
+### 8.2 Closed
+
+| ID      | Question                                                                                                                                                                                                      | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|---------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q11** | Does `Create` need a dedupe story now that `idempotency_key` is gone? Two identical submissions produce two pending requests.                                                                                 | **No, and it is not documented.** Rails developers know how to prevent accidental double submission, and a deliberate duplicate is a legitimate request that the approvers can cancel. Neither the README nor PLAN.md explains it.                                                                                                                                                                                                                                      |
+| **Q12** | `SYSTEM_ACTOR` used `id "0"`, which a string-keyed host actor could legitimately hold.                                                                                                                        | **Use the non-castable sentinel `"system"`.** §5.5 and §19.15 updated; tickets M1a-7, M1a-9 and M1b-10 follow.                                                                                                                                                                                                                                                                                                                                                          |
+| **Q16** | Should the gem constrain `json` for hosts, or keep it a development pin? Raised by M1a-1.                                                                                                                     | **Constrain it.** `spec.add_dependency "json", "~> 2.7"`. A `gemspec` directive in a Gemfile pulls runtime dependencies in too, so this pins the gem's own suite *and* every host - which a development pin never could. See §2 and §19.18.                                                                                                                                                                                                                             |
+| **Q13** | Spec-level config isolation: `ChangeRequests.config` is memoised module state, and a mutation in one example is visible in the next - confirmed by probe. `ChangeRequests.operations` adds a second global.   | **A `spec/support` helper that snapshots and restores both**, shipped with M1b-0. Same shape as the two order-dependent failures already hit. **As built** it installs a *copy* per example and restores the originals, which needed `initialize_copy` on both objects - see M1b-0.                                                                                                                                                                                     |
+| **Q14** | M1b-0's acceptance required M1b-4's code: a registry can only *describe* a workflow, not materialise one.                                                                                                     | **M1b-0 asserts the description; the materialisation assertion moves to M1b-4.**                                                                                                                                                                                                                                                                                                                                                                                        |
+| **Q15** | `ApprovalQuorum` is `Immutable`, so `approval.quorums.destroy_all` raises `ReadOnlyRecord`.                                                                                                                   | **Unapprove deletes the approval and lets the database cascade remove the links.** The obvious code is the wrong code, so M1b-6 says so.                                                                                                                                                                                                                                                                                                                                |
+| **Q17** | §9.4 uses `config.actor_identity` for the requester-cannot-approve rule, but only approvals carried an identity column. Raised by M1b-1.                                                                      | **Add `requester_identity` to `change_requests`**, snapshotted by `Commands::Create`. Deferring it would need a second migration for hosts that had already installed. See §5.1 and §9.4.                                                                                                                                                                                                                                                                               |
+| **Q18** | M1b-4's acceptance wanted a multi-stage operation, but `op.workflow` is M2.                                                                                                                                   | **Build the `Workflow` description by hand in the spec.** The description objects are public value objects, so the materialiser's multi-stage path is proved now; M2 adds only the DSL that produces such a description.                                                                                                                                                                                                                                                |
+| **Q19** | An operation could be declared with no `op.approvals`, producing a request with no stages that could never be approved.                                                                                       | **`Commands::Create` refuses it**, with `ConfigurationError`, alongside a missing `service`. An approval gate with no approvers is a misconfiguration, not a fast path.                                                                                                                                                                                                                                                                                                 |
+| **Q20** | §7's `:stage_not_current` branch compares the current stage with itself. What does it actually test?                                                                                                          | **Eligible for a quorum on another stage of this request, but not the current one** — §6.9's stage-three director.                                                                                                                                                                                                                                                                                                                                                      |
+| **Q21** | Should `:already_decided` honour `config.actor_identity`?                                                                                                                                                     | **Yes.** §9.4 uses the identity in place of `(type, id)` when counting distinct approvers, and deciding a stage twice is that same question.                                                                                                                                                                                                                                                                                                                            |
+| **Q22** | M1b-5 is specified to call `Commands::EvaluateWorkflow`, which is M1b-12.                                                                                                                                     | **The call lands with M1b-12**, together with the advancement specs. M1b-5's own acceptance asks only for the approval, the links and one `approved` event.                                                                                                                                                                                                                                                                                                             |
+| **Q23** | Should Unapprove honour `config.actor_identity`, letting one human retract through a second actor class?                                                                                                      | **No.** §9.4 names two uses for the identity and retraction is neither; only the actor who wrote the row may take it back.                                                                                                                                                                                                                                                                                                                                              |
+| **Q24** | May Unapprove delete a `rejected` row, or approvals only?                                                                                                                                                     | **Either decision.** Unapprove is "take back my decision on this stage". The default short-circuit makes the request final, so this is reachable through `config.only_record_rejections`.                                                                                                                                                                                                                                                                               |
+| **Q25** | Where does Reject's mandatory reason belong, given §7 has the presenter consult the same guard?                                                                                                               | **In the command.** A guard refusing without a reason could never let the button that collects one appear.                                                                                                                                                                                                                                                                                                                                                              |
+| **Q26** | Does the default (short-circuiting) rejection branch also write an approvals row, or only the event?                                                                                                          | **Always write the row**, so the table tells one story and the unique index behaves the same either way.                                                                                                                                                                                                                                                                                                                                                                |
+| **Q34** | M1b-11's branch list defined `:not_approved` so broadly that `:attempts_exhausted` was unreachable, contradicting its own rationale. | **Follow the rationale.** `:not_approved` is the status question; `:attempts_exhausted` the ceiling question. Both reachable. |
+| **Q35** | `t.may_execute` existed with no reader, so a class declared unable to execute would pass `Guards::Execute`. | **Enforce it in the guard**, with `:not_permitted`, before the separation-of-duties branches. |
+| **Q32** | Expire's refusals mix an authorization answer (`:not_system`) with state answers, but `refuses_with` names one class and there is no `NotExpirable`.                                                          | **`NotAuthorized` for all of them**, plus the shared `:already_finalized` mapping. Expire is internal; its guard is a floor beneath M3b's query, not a flash.                                                                                                                                                                                                                                                                                                           |
+| **Q33** | §7.2 permits Expire when `pending` **or** `approved`, so `:not_pending` would misname the refusal for `executing` and `failed`.                                                                               | **Add `:not_expirable`** to the shared vocabulary.                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **Q30** | §7.2 says Comment is permitted "always" and never calls its body mandatory. Blank body — refuse or record?                                                                                                    | **Refuse**, with `:body_required`. An empty comment is permanent noise in an append-only trail.                                                                                                                                                                                                                                                                                                                                                                         |
+| **Q31** | `Guards::Base#check!` passes `request:`/`reason:` to the declared error class, but `NotAuthorized` was a plain `Error` and silently swallowed both. Found by M1b-9, the first guard to declare it.            | **Extract `Refusal` from `TransitionError` and include it in `NotAuthorized` too.** Ancestry untouched; Create's message-only `fail NotAuthorized, "…"` still works.                                                                                                                                                                                                                                                                                                    |
+| **Q28** | §7.2 permits Cancel in any non-final status, which includes `executing` — where the target is actually running.                                                                                               | **Refuse while `executing`.** A status change cannot recall it, and a terminal status would leave the execution unable to record its outcome. Narrower than §7.2's wording, recorded there.                                                                                                                                                                                                                                                                             |
+| **Q29** | The acceptance wants `AlreadyFinalized`, but `refuses_with` names one error class per guard.                                                                                                                  | **`Guards::Base` maps `:already_finalized` to `AlreadyFinalized`** for every guard; everything else raises the declared class.                                                                                                                                                                                                                                                                                                                                          |
+| **Q27** | A mistaken approval is retractable; a mistaken rejection killed the request outright, and `only_record_rejections` — whose purpose is to *not* stop anything — was the only mode where taking it back worked. | **Extend `op.cooldown` to rejection in M9b.** A rejection stops the stage at once and finalises the request only after the window, so `Unapprove` has something to undo. A stage with a standing rejection can never be satisfied; withdrawing the last one returns it to `pending`. At cooldown `0` nothing about M1 changes. See §5.2, §7.1, §7.2 and §19.20. **Consequence found later:** at cooldown `0` the state this describes is unreachable, which is **Q35**. |
 
 ---
 
 ## 9. Issues found in PLAN.md — all resolved
+
+One needs re-reading against the code: **I10**. The evaluator is `Commands::EvaluateWorkflow` as decided,
+but `ChangeRequests::Workflow` came back as the *declaration description* (**Q18**), so a `workflow.rb` does
+exist in the §2 layout again — holding value objects, not logic. See M1b-0's **As built**.
 
 | ID      | Issue                                                                                               | Resolution in PLAN.md                                                                                                                                                                                                                                         |
 |---------|-----------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -879,25 +1295,49 @@ affect - M1b-0 for Q13 and Q14, M1b-6 for Q15.
 
 ## 10. Risks
 
-| ID     | Risk                                                                          | Position                                                                                                                                 |
-|--------|-------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
-| **R1** | Ruby 4.0.6 + Rails 8.1 compatibility is unverified.                           | **Ruby 4+ is fixed.** M0-1 verifies the combination as its first task; a failure is a finding to report, not a reason to drop the floor. |
-| **R2** | The nine-table migration is written before the install generator exists (M7). | **Accepted and inverted:** M1a-2 *is* the generator template, run in specs by a support migrator. M7 inherits a tested artefact.         |
-| **R3** | Schema mistakes become host migrations after 0.2.0.                           | **Downgraded.** There is no production data during development; migrations are cheap until the first real adopter.                       |
-| **R4** | Guard/inbox predicate drift between M1b-2's Ruby and M9c's SQL.               | **Accepted.** Everything ships together at 1.0; M1b-2's table is structured so M9c can add the SQL as a second subject.                  |
-| **R5** | The ticket sum is roughly twice §17's original M1 budget.                     | **Accepted.** §17's estimates have been raised to match: M0 5 d, M1a 7 d, M1b 11 d, and the overall total to 10–12 weeks.                |
+| ID     | Risk                                                                                                                | Position                                                                                                                                                                                                                                          |
+|--------|---------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **R1** | Ruby 4.0.6 + Rails 8.1 compatibility is unverified.                                                                 | **Closed.** Verified by M0-1: both resolve, boot and run the suite. The Rails floor was raised from `>= 7.1` to `>= 8.1` at the same time, matching §18's cut line.                                                                               |
+| **R2** | The nine-table migration is written before the install generator exists (M7).                                       | **Closed, inverted as planned:** M1a-2 *is* the generator template, run in specs by `spec/support/gem_schema.rb`, and the headless probe installs from it end to end. M7 inherits a tested artefact.                                              |
+| **R3** | Schema mistakes become host migrations after 0.2.0.                                                                 | **Still live, and it has already fired once.** `rejected_at` was missed and back-filled in #34 while the gem is unreleased, which cost one PR. The same miss after 0.2.0 is a migration in every host. See **Q38**.                               |
+| **R4** | Guard/inbox predicate drift between M1b-2's Ruby and M9c's SQL.                                                     | **Accepted.** Everything ships together at 1.0; the predicate has one caller (`Guards::Base#qualifying`) and one shared table (`spec/support/eligibility_examples.rb`), so M9c has a single subject to add SQL beside.                            |
+| **R5** | The ticket sum is roughly twice §17's original M1 budget.                                                           | **Accepted, and holding.** 29 of 34 tickets merged in three calendar days against 19.25 estimated days — the estimates are wall-clock days for one developer and were never a schedule. §17 carries the same numbers, so the two documents agree. |
+| **R6** | ~~The ADR set and PLAN.md record the same decisions at different times, with nothing enforcing the handover.~~ | **Withdrawn (Q40).** The maintainer keeps the two in step by hand. Not a risk this plan carries, and no ticket owns it. |
 
 ---
 
 ## 11. Estimates
 
-| Block                              | Tickets        | Days        |
-|------------------------------------|----------------|-------------|
-| M0 prerequisites                   | M0-1 … M0-8    | 5.0         |
-| M1a — schema and models            | M1a-1 … M1a-10 | 7.25        |
-| M1b — operations, guards, commands | M1b-0 … M1b-15 | 11.0        |
-| **Total to 0.2.0**                 | **34 tickets** | **23.25 d** |
+| Block                              | Tickets        | Estimated   | State                                                               |
+|------------------------------------|----------------|-------------|---------------------------------------------------------------------|
+| M0 prerequisites                   | M0-1 … M0-8    | 5.0         | ✅ merged (+ 4 unplanned items, §2.1)                                |
+| M1a — schema and models            | M1a-1 … M1a-10 | 7.25        | ✅ merged (+ `rejected_at` back-fill, #34)                           |
+| M1b — operations, guards, commands | M1b-0 … M1b-10 | 7.0         | ✅ merged                                                            |
+| **Delivered**                      | **29 tickets** | **19.25 d** | PRs #1–#36, `rake ci` green                                         |
+| M1b-11 `Guards::Execute`           |                | 0.5         | ⬜                                                                   |
+| M1b-12 `EvaluateWorkflow`          |                | **1.5**     | ⬜ raised from 1.25 — it edits three merged commands                 |
+| M1b-13 reason vocabulary and i18n  |                | 0.5         | ⬜                                                                   |
+| M1b-14 truth tables and headless   |                | **0.75**    | ⬜ lowered from 1.0 — the per-guard tables landed with their tickets |
+| M1b-15 concurrency specs           |                | 0.75        | ⬜                                                                   |
+| **Remaining**                      | **5 tickets**  | **4.0 d**   |                                                                     |
+| **Total to 0.2.0**                 | **34 tickets** | **23.25 d** | unchanged: the two revisions cancel                                 |
 
-The §17 table now carries these numbers rather than the original 9–12 days, so the plan and the milestone
-table agree. The largest single line is M1a-2 (2 d): the migration template is the artefact everything else
-in the gem is built on, and the one place where being wrong is expensive after the first adopter.
+The largest single line is still M1a-2 (2 d), and it earned it: the migration template is the artefact
+everything else in the gem is built on, and the one place where being wrong is expensive after the first
+adopter — which **R3** demonstrated at the cost of one PR while it is still cheap.
+
+**M1b-12 is the critical path.** M1b-14 cannot finish without it (the headless spec has to reach `approved`),
+M1b-15's first and third races cannot be written without it, and DoD items 4 and 5 — the only two of the
+five still open — both turn on it. M1b-11 and M1b-13 are the only tickets that can proceed in parallel with
+it, and M1b-13 wants two things finished first: M1b-11's `:not_approved` and `:attempts_exhausted`, and
+M1b-4's `:may_not_request` amendment (**Q34**), which is small enough to fold into whichever ticket reaches
+it. The order is **M1b-11 → M1b-12 → M1b-13 → M1b-14 → M1b-15**, with M1b-11 and M1b-12 independent enough
+to swap.
+
+**Nothing is waiting on a decision.** Q34–Q41 were answered on 2026-09-11 and are folded into the tickets
+above: M1b-4 gains a two-word amendment (**Q34**), M1b-12 ships step 0 and keeps System attribution
+(**Q35**, **Q36**), M1b-15 is DatabaseCleaner's first user (**Q39**), and DoD item 6, a column-list spec and
+the ADR handover are all struck (**Q37**, **Q38**, **Q40**). Two answers reached PLAN.md rather than staying
+here — **Q34**'s §7.2 footnote and **Q36**'s §5.5 widening — and **Q41** took `stage_closed` out of
+`Event::KINDS`, the only code change this revision produced. The one deferred item is
+`Operation#requestable_by?`, recorded against **M6a** rather than built here.
