@@ -66,6 +66,10 @@ class CreateChangeRequests < ActiveRecord::Migration[<%= migration_version %>]
       t.string :status, null: false, default: "pending"
 
       t.datetime :satisfied_at, precision: 6
+      # The rejection's counterpart to satisfied_at: when the stage was stopped, and therefore when
+      # op.cooldown stops being able to give it back. Written from M9b; here from the first
+      # migration so no host needs a second one for it (PLAN §5.2, §7.1).
+      t.datetime :rejected_at, precision: 6
       t.datetime :closed_at, precision: 6
 
       t.timestamps precision: 6, null: false
