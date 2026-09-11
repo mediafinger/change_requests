@@ -108,6 +108,26 @@ module ChangeRequests
         config.authorization
       end
 
+      # The quorums of the current stage this actor qualifies for - the same predicate
+      # Request.awaiting_approval_from runs in SQL (§5.3). Shared by every guard that asks whether
+      # someone is an eligible approver: Approve, Reject, Cancel and Comment.
+      def eligible_quorums
+        @eligible_quorums ||= qualifying(stage&.quorums&.pending)
+      end
+
+      # §6.9: a stage-three director sitting on a stage-one request is told to wait, not refused.
+      def eligible_on_another_stage?
+        request.stages.where.not(id: stage&.id).any? { |other| qualifying(other.quorums).any? }
+      end
+
+      # One decision per stage per person. When the host declares a shared identity it is used in
+      # place of (type, id), so one human cannot decide twice through two actor classes (§9.4).
+      def already_decided?
+        return false if stage.nil?
+
+        decided_by_reference? || decided_by_identity?
+      end
+
       # The acting actor as the columns store them. Raises UnknownActorType for an unregistered
       # class, which is the allowlist doing its job (§9.1).
       def actor_ref
@@ -129,6 +149,22 @@ module ChangeRequests
       end
 
       private
+
+      def qualifying(quorums)
+        return [] if quorums.nil?
+
+        quorums.select { |quorum| authorization.allows?(actor: actor, quorum: quorum) }
+      end
+
+      def decided_by_reference?
+        stage.approvals.exists?(approver_type: actor_ref[:type], approver_id: actor_ref[:id])
+      end
+
+      def decided_by_identity?
+        identity = identity_of(actor)
+
+        identity.present? && stage.approvals.exists?(approver_identity: identity)
+      end
 
       def identity_of(subject)
         return subject[:identity] if subject.is_a?(Hash)
