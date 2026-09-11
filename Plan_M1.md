@@ -961,18 +961,18 @@ claim-then-invoke and the §8.1 override branch are M3a** and are not built here
 ```
 :operation_undeclared   (Guards::Base, free)
 :already_finalized      (request.final?  → the shared REASON_ERRORS mapping, Q29)
-:not_approved           (status is neither `approved` nor `failed`)                       ← Q34
+:not_approved           (status is neither `approved` nor `failed`)                       ← Q42
 :attempts_exhausted     (failed, but attempts.count >= max_attempts)
-:not_permitted          (the actor's registered type declares may_execute = false)        ← Q35
+:not_permitted          (the actor's registered type declares may_execute = false)        ← Q43
 :requester              (same_person?(request.requester, actor) and not config.requester_may_execute)
 :not_permitted          (an approver on this request, and not config.approver_may_execute)
 ```
 
-**Q34.** The original parenthetical for `:not_approved` — "not approved, and not (failed and retryable)" —
+**Q42.** The original parenthetical for `:not_approved` — "not approved, and not (failed and retryable)" —
 swallowed the exhausted-retry case and left `:attempts_exhausted` unreachable, contradicting the rationale
 below it. `:not_approved` is the status question only; `:attempts_exhausted` is the ceiling question.
 
-**Q35.** `config.actor_type … t.may_execute` (§9.1, default `true`) had no reader anywhere. It is checked
+**Q43.** `config.actor_type … t.may_execute` (§9.1, default `true`) had no reader anywhere. It is checked
 here, before the separation-of-duties branches, the way `may_approve` is checked inside
 `Authorization::Permissions` — otherwise a class declared unable to execute would still pass the guard a
 presenter consults.
@@ -997,7 +997,7 @@ intentionally absent at 0.2.0, so a reader of the 0.2.0 gem finds the gap stated
 
 ---
 
-### M1b-12 — `Commands::EvaluateWorkflow` ⬜ **outstanding — the ticket that closes the loop**
+### M1b-12 — `Commands::EvaluateWorkflow`
 **Spec:** §7.1; decisions **D5**, **I10**
 **Depends on:** M1b-5 ✅, M1b-6 ✅, M1b-7 ✅ — **it edits all three**
 **Deliver:** the evaluation command — an internal command with no actor, invoked only from `Approve`,
@@ -1012,8 +1012,15 @@ the free-floating `advance_workflow!` and `lib/change_requests/workflow.rb` of t
    M9a rather than extending it.
 
 Counting is only via `change_request_approval_quorums` links, never re-derived (§5.3, §7.1). Closed stages
-are immutable and there is no rollback into an earlier stage. `all_quorums`, one-quorum-per-approval and
-named-approver linking are **M9a**; cooldown is **M9b**.
+are immutable and there is no rollback into an earlier stage. One-quorum-per-approval and named-approver
+linking are **M9a**; cooldown is **M9b**.
+
+**`all_quorums`'s satisfaction rule ships here** (**Q44**), not with M9a. The column value is already valid,
+`Stage#all_quorums?` already exists and M1b-4 already materialises such stages — so an evaluation that knew
+only `any_quorum` would close "1 Admin AND 2 Owners" on the Admin alone, silently and green. It is one line
+beside the `any_quorum` branch. M9a still owns what it actually owns: the *linking* rule that stops one
+person holding both roles closing two quorums. It also makes the acceptance's "quorum losing its threshold"
+case reachable through the public API, since under `any_quorum` a stage closes the instant a quorum is met.
 
 **A standing rejection outranks any number of approvals** (**Q27**, §19.20). Step 0 of the evaluation, before
 any recount: a stage holding a rejection is `rejected` and cannot be satisfied; a stage that was `rejected`
@@ -1077,7 +1084,7 @@ command specs no longer asserting that nothing advances.
 
 ---
 
-### M1b-13 — Reason vocabulary and i18n ⬜ **outstanding**
+### M1b-13 — Reason vocabulary and i18n
 **Spec:** §7, §5.9
 **Depends on:** M1b-5 ✅ … M1b-11
 **Deliver:** `config/locales/en.yml` with every guard reason and `TransitionError` message, plus the
@@ -1095,14 +1102,25 @@ command specs no longer asserting that nothing advances.
   file needs **one key per entry of `Guards::Base::REASONS`** plus **one per `Refusal`-including error
   class** as the no-reason fallback. `Stage#label` and `Quorum#label` already read
   `change_requests.stages.<name>` / `change_requests.quorums.<name>` with a `humanize` fallback.
-- **The engine has to add the load path.** Nothing does today: `config/` holds only `routes.rb`, and
-  `config/locales` does not exist. `spec/integration/packaging_spec.rb` has a **pending** example for it
-  that turns green the moment the directory does — that pending is this ticket's tripwire, so do not delete
-  it, satisfy it.
+- ~~**The engine has to add the load path.**~~ **It does not** (**Q46**): `Rails::Engine` defines
+  `paths["config/locales"]` and an initializer that appends it to `I18n.load_path`, so creating the
+  directory is the whole of it — verified by probe before writing any engine code.
+  `spec/integration/packaging_spec.rb`'s **pending** example for `config/locales` is this ticket's
+  tripwire; it turns green on the directory existing, and the file has to be `git add`ed for it to,
+  because the gemspec's file list comes from `git ls-files`.
 - **Every entry of `REASONS` will have a raiser by the time this lands.** `:not_approved` and
   `:attempts_exhausted` become reachable with M1b-11; `:may_not_request` becomes reachable with M1b-4's
   one-line amendment (**Q34**). If M1b-4 has not been amended when this ticket starts, amend it here — the
   enumeration below is what makes the gap visible, and it is two words.
+
+**`Commands::Create` raises the reason and no message** (**Q45**). Its message named
+`t.may_request` — a configuration key the requester reading the flash can do nothing about. The reason is
+set so a host still branches on it; the wording comes from the locale file.
+
+**The message assertions were order-dependent** (**Q47**). `spec/change_requests/error_spec.rb` loads only
+`spec_helper`, but `I18n.load_path` is process-wide: once any spec boots the dummy app the engine puts the
+gem's locale file on it, so "the message is the symbol" passed or failed depending on which files ran
+first. The fallback claims now use reasons nothing will ever translate, which holds either way.
 
 **Acceptance:** a spec enumerates every reason symbol raised anywhere in the suite and asserts a translation
 exists, so a new reason cannot ship untranslated — **and the reverse**, that every entry of `REASONS` is
@@ -1113,7 +1131,7 @@ not become a thing the domain core needs.
 
 ---
 
-### M1b-14 — Guard truth tables and command specs ⬜ **outstanding — but most of it is already paid for**
+### M1b-14 — Guard truth tables and command specs
 **Spec:** §15.2
 **Depends on:** all M1b
 **Deliver:** one table-driven spec per guard — guard × status × actor role, one row per case (§15.2).
@@ -1137,6 +1155,17 @@ cannot produce:
    actor role, asserting that the same situation gets the same reason from each guard that has an opinion
    about it. The branch orders were chosen deliberately to line up — `Reject` mirrors `Approve` so "not your
    turn yet" reads the same — and nothing currently fails if one of them drifts.
+
+   **They had drifted** (**Q48**). For all four final statuses `Approve`, `Unapprove` and `Reject` answered
+   `:not_pending` while `Cancel`, `Execute` and `Expire` answered `:already_finalized` — so a host rescuing
+   `AlreadyFinalized` to mean "this request is over" caught three commands and missed three. The three
+   decision guards gained an `:already_finalized if request.final?` branch ahead of their `:not_pending`
+   one, which now means what it says: open, but not open for decisions.
+
+   **Scope** (**Q49**): the status axis is written out cell by cell — 56 cells, the axis every guard has an
+   opinion about — and the actor-role axis is asserted as **cross-guard rules** rather than a third
+   dimension. The per-guard files already cover roles in ~240 examples, and a 400-cell table tends to get
+   regenerated from the code it is meant to check.
 3. **Nothing for the `emit` invariant — it shipped with M1a-7.** `spec/change_requests/event_spec.rb`
    proves it by **scanning the source** rather than the exercised paths: it greps every file under `lib/`
    for an event write and asserts `Commands::Base#emit` is the only match, with two companion examples
@@ -1150,7 +1179,7 @@ cannot produce:
 
 ---
 
-### M1b-15 — Concurrency regression specs (the M1 subset) ⬜ **outstanding**
+### M1b-15 — Concurrency regression specs (the M1 subset)
 **Spec:** §15.3
 **Depends on:** M1b-14, and **hard on M1b-12**: races 1 and 3 are about stage *transitions*, and nothing
 transitions a stage until EvaluateWorkflow lands
@@ -1182,6 +1211,21 @@ index already enforces it. It can be written before M1b-12 and is the cheapest p
 
 **Acceptance:** each spec fails when `with_lock` is removed — prove the test has teeth. Removing
 `on_conflict` from `Commands::Approve` must turn race 2 into a `RecordNotUnique`, not a pass.
+
+**The teeth are a measurement, not a removal** (**Q50**). Taken literally, "assert the race breaks without
+the lock" is a spec that can pass by luck and fail the build on a slow morning — the interleaving is the
+scheduler's to choose. Instead both probes measure the thing `with_lock` exists to control: **were two
+command bodies ever inside at the same time?** With the lock, never; with it removed and the body held open
+50ms, always. Both directions are deterministic, both run in CI, and neither has to break anything first.
+
+What the overlap then *costs* is deliberately not asserted: an unlocked race ends in two `stage_satisfied`
+events, or a `StaleRequest`, or — with a lucky interleaving — nothing at all. Two consequence examples were
+written, passed alone, and failed inside the file; they are gone. The damage is what the three race
+descriptions assert does not happen while the lock is there.
+
+**No mocks inside the threads.** rspec-mocks is not thread-safe, so the probes are ordinary subclasses:
+`TimedApprove` records its span, `UnlockedApprove` overrides `around_perform` to yield and changes nothing
+else.
 **Est:** 0.75 d
 
 ---
@@ -1257,8 +1301,15 @@ the remaining five tickets are built on.
 | **Q24** | May Unapprove delete a `rejected` row, or approvals only?                                                                                                                                                     | **Either decision.** Unapprove is "take back my decision on this stage". The default short-circuit makes the request final, so this is reachable through `config.only_record_rejections`.                                                                                                                                                                                                                                                                               |
 | **Q25** | Where does Reject's mandatory reason belong, given §7 has the presenter consult the same guard?                                                                                                               | **In the command.** A guard refusing without a reason could never let the button that collects one appear.                                                                                                                                                                                                                                                                                                                                                              |
 | **Q26** | Does the default (short-circuiting) rejection branch also write an approvals row, or only the event?                                                                                                          | **Always write the row**, so the table tells one story and the unique index behaves the same either way.                                                                                                                                                                                                                                                                                                                                                                |
-| **Q34** | M1b-11's branch list defined `:not_approved` so broadly that `:attempts_exhausted` was unreachable, contradicting its own rationale. | **Follow the rationale.** `:not_approved` is the status question; `:attempts_exhausted` the ceiling question. Both reachable. |
-| **Q35** | `t.may_execute` existed with no reader, so a class declared unable to execute would pass `Guards::Execute`. | **Enforce it in the guard**, with `:not_permitted`, before the separation-of-duties branches. |
+| **Q50** | "Each spec fails when `with_lock` is removed" is only probabilistically true — without the lock the damaging interleaving is likely, not certain, so such a spec can pass by luck and redden CI at random. | **Measure the serialisation instead.** Assert no two command bodies overlap with the lock, and that they always do without it. Deterministic in both directions, and it demonstrates the mechanism rather than a downstream symptom. |
+| **Q48** | The cross-guard table found a live split: `Approve`/`Unapprove`/`Reject` answered `:not_pending` for a finished request, `Cancel`/`Execute`/`Expire` answered `:already_finalized`. | **Align on `:already_finalized`.** One reason, one class, whichever guard met it — which is what Q29 made the mapping mean. `:not_pending` now covers `approved`/`executing`/`failed` only. |
+| **Q49** | §15.2 asks for guard × status × actor role, but the per-guard specs already cover roles.          | **Status × guard declared literally; roles as cross-guard rules.** Each rule states an invariant two guards must share, rather than repeating per-guard work. |
+| **Q45** | `Commands::Create` raised `NotAuthorized` with a developer-facing message naming `t.may_request`, and no reason — so `:may_not_request` had no raiser. | **Drop the message, set the reason.** The translation words it for the person being refused; a configuration key has no business in a flash. |
+| **Q46** | The ticket said the engine has to add `config/locales` to `I18n.load_path`.                                                    | **It does not.** `Rails::Engine` already does, verified by probe. The directory existing is the whole change — plus `git add`, since the gemspec's file list is `git ls-files`. |
+| **Q47** | Shipping real messages made three spec files order-dependent: `I18n.load_path` is process-wide, so "the message is the symbol" held only until some other file booted Rails. | **Assert the fallback with reasons nothing translates.** Deterministic under any seed and any subset of the suite. |
+| **Q42** | M1b-11's branch list defined `:not_approved` so broadly that `:attempts_exhausted` was unreachable, contradicting its own rationale. | **Follow the rationale.** `:not_approved` is the status question; `:attempts_exhausted` the ceiling question. Both reachable. |
+| **Q43** | `t.may_execute` existed with no reader, so a class declared unable to execute would pass `Guards::Execute`. | **Enforce it in the guard**, with `:not_permitted`, before the separation-of-duties branches. |
+| **Q44** | Evaluation was specified for `any_quorum` only, but `satisfied_by: "all_quorums"` is already a valid column value and M1b-4 materialises such stages. | **Implement the satisfaction rule now.** One line beside the `any_quorum` branch; M9a still owns the one-quorum-per-approval *linking* rule. Without it an `all_quorums` stage would close on its first satisfied quorum — "1 Admin AND 2 Owners" met by the Admin alone. |
 | **Q32** | Expire's refusals mix an authorization answer (`:not_system`) with state answers, but `refuses_with` names one class and there is no `NotExpirable`.                                                          | **`NotAuthorized` for all of them**, plus the shared `:already_finalized` mapping. Expire is internal; its guard is a floor beneath M3b's query, not a flash.                                                                                                                                                                                                                                                                                                           |
 | **Q33** | §7.2 permits Expire when `pending` **or** `approved`, so `:not_pending` would misname the refusal for `executing` and `failed`.                                                                               | **Add `:not_expirable`** to the shared vocabulary.                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **Q30** | §7.2 says Comment is permitted "always" and never calls its body mandatory. Blank body — refuse or record?                                                                                                    | **Refuse**, with `:body_required`. An empty comment is permanent noise in an append-only trail.                                                                                                                                                                                                                                                                                                                                                                         |
