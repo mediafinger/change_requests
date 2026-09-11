@@ -3,8 +3,8 @@
 module ChangeRequests
   # Eligibility by permission × actor type, both independently nullable (§5.3):
   #
-  #   ("User", "editor")  Users holding :editor      (NULL, "editor")  anyone holding :editor
-  #   ("Admin", NULL)     any Admin                  (NULL, NULL)      rejected
+  #   ("editor", "User")  Users holding :editor      ("editor", NULL)  anyone holding :editor
+  #   (NULL, "Admin")     any Admin                  (NULL, NULL)      rejected
   #
   # Write-once: materialised from the frozen workflow when the request is created, so editing an
   # operation's permission list never changes who may approve a request already in flight.

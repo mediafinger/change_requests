@@ -6,7 +6,9 @@
 ## Context
 
 Some transitions have no human behind them: a request expiring, a reaper closing out an
-interrupted execution, a cleanup task cancelling requests whose operation was removed. The audit
+interrupted execution, a cleanup task cancelling requests whose operation was removed, and — the
+most frequent case by far — **every stage closing**, since workflow evaluation is an internal command
+with no actor of its own ([ADR-0017](0017-approvals-count-through-links.md)). The audit
 trail still has to say who did it.
 
 Leaving the actor columns NULL makes every reader handle a null case, and makes "nobody" and "we
