@@ -121,6 +121,7 @@ change_requests/
 │       ├── operation/workflow.rb             # stage + quorum definitions
 │       ├── guards/                            # allowed? + reason, shared by commands AND presenters
 │       │   ├── base.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
+│       │   └── (no create.rb - Create has no request to guard; see §7.2)
 │       ├── commands/                          # guard + mutate + emit event, inside with_lock
 │       │   ├── base.rb create.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
 │       │   └── evaluate_workflow.rb          # advance the workflow after a decision - §7.1
@@ -531,18 +532,30 @@ request is authoritative.
 | `occurred_at`       | datetime, not null            |                                                            |
 
 Kinds: `requested`, `approved`, `unapproved`, `rejected`, `commented`, `canceled`, `quorum_satisfied`,
-`stage_satisfied`, `stage_closed`, `overridden`, `execution_started`, `executed`, `execution_failed`,
-`expired`, `reaped`, `operation_undeclared`.
+`stage_satisfied`, `overridden`, `execution_started`, `executed`, `execution_failed`, `expired`, `reaped`,
+`operation_undeclared`.
+
+There is no `stage_closed`. At cooldown `0` a stage is satisfied and closed in the same breath, so a second
+kind would record the same instant twice; `stage_satisfied` is the close. **M9b adds it** if and when
+`op.cooldown` puts a window between the two and the distinction starts carrying information. A kind is an
+inclusion validation rather than a CHECK (§19.16) precisely so adding one then costs nobody a migration.
 
 `kind` is enforced by an **inclusion validation only, with no CHECK constraint**. Every later milestone adds
 kinds, and a CHECK would make each one a migration in every host application - a cost with no matching
 benefit, since nothing but the gem ever writes this table.
 
 **The system actor is a sentinel, not a NULL.** Gem-originated events (expiry, the reaper, undeclared-
-operation cancellation, cooldown stage closing) are written with
+operation cancellation, and **every** stage closing - the synchronous one at cooldown `0` as much as the
+deferred one) are written with
 `actor_type: "System", actor_id: "system", actor_label: "System"` - `ChangeRequests::SYSTEM_ACTOR`. It is
 exempt from the registered-type allowlist, and the columns are `not null`, so "who did this" is answerable
 for every row and no presenter or export has to branch on nil.
+
+**Closing a stage is the gem's act, not the approver's**, even when an approval triggered it in the same
+lock: `EvaluateWorkflow` is an internal command with no actor (§7.1), so `stage_satisfied` and its siblings
+carry the sentinel. The approvals that caused the close are already in the trail one row earlier, each with
+its own actor, so nothing is lost - and a presenter that attributed the close to whoever happened to approve
+last would be asserting a decision that person never made.
 
 
 `stage_satisfied` carries `metadata: { quorum: "admin" }` when the stage has named quorums, so a stage met
@@ -1352,9 +1365,15 @@ withdrawn. This is the shape that makes the pull-request loop work - reject, the
 problem, the rejector withdraws their rejection and approves - without the earlier approvals being lost.
 Under `config.only_record_rejections` a rejection never stops the stage, so step 0 does nothing.
 
-`close_stage!` sets `closed_at` and status `closed`, emits `stage_satisfied` naming the quorum that closed
-it, then either advances `current_stage_position` to the next stage or - when none remains - sets the
-request `approved`.
+`close_stage!` sets `closed_at` and status `closed` on the stage and `satisfied_at` and status `satisfied`
+on each quorum that met its threshold, emits **one `quorum_satisfied` per such quorum and then one
+`stage_satisfied`** naming the quorum that closed it, and either advances `current_stage_position` to the
+next stage or - when none remains - sets the request `approved`.
+
+The two kinds answer different questions and a timeline needs both: `quorum_satisfied` says a counting rule
+was met, which under `all_quorums` happens repeatedly before anything closes; `stage_satisfied` says the
+stage is over. For a single-quorum stage they arrive as a pair one after the other, which is the cost of
+having the multi-quorum case read correctly from the same code.
 
 **Counting.** An approval counts toward a quorum only via its `change_request_approval_quorums` links,
 written at decision time and never re-derived. Under `any_quorum` an approval links to every quorum the
@@ -1426,7 +1445,7 @@ sitting in stage one.
 
 | Command              | Who may                                                       | Permitted when                                                                          | Effect                                             |
 |----------------------|---------------------------------------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------|
-| `Create`             | any actor whose type declares `may_request`                   | operation declared; payload valid                                                       | `pending` request, stages and quorums materialised |
+| `Create`†            | any actor whose type declares `may_request`                   | operation declared and complete; payload valid                                          | `pending` request, stages and quorums materialised |
 | `Approve`            | eligible approver for a quorum of the current **open** stage  | request `pending`; actor is not the requester; actor has not already decided this stage | approval row + quorum links; `EvaluateWorkflow`    |
 | `Unapprove`          | the actor who gave that decision                              | their stage still reversible (`pending`, or `satisfied`/`rejected` within cooldown)     | decision and links deleted; `EvaluateWorkflow`     |
 | `Reject`             | eligible approver of the current open stage, or the requester | request `pending`; reason present                                                       | stage `rejected`; request `rejected` once the cooldown elapses, or recorded only (§7.1) |
@@ -1437,6 +1456,21 @@ sitting in stage one.
 | `Expire`             | system only                                                   | `pending` or `approved` past `expires_at`                                               | request `expired`                                  |
 
 Every guard except `Comment` additionally refuses when the operation is no longer declared (§5.11).
+
+**† `Create` is the one row with no guard object.** A guard is `(request:, actor:)` - "may this actor do
+this *to this row*" - and at creation there is no row. `Commands::Create` therefore performs its own three
+checks inline, in the order above: the operation is declared, it is complete (a `service` and a non-empty
+workflow), and the requester's registered type declares `may_request`. A `Guards::Create` would have to
+carry a second signature, and one shape for every guard is what lets a single shared example run against
+all of them.
+
+That leaves the presenter half of §7's rule - a disabled button and a raised error must not disagree -
+unanswered for the "raise a request" button, because there is no guard to consult. **`Operation#requestable_by?(actor)`
+answers it instead**, and ships with M6a, the first milestone that renders such a button. It is not a guard:
+it takes no request, because the question genuinely does not involve one. It must read the *same*
+implementation of the three checks that `Commands::Create` reads - the completeness half belongs on
+`Operation` beside `#problems`, where `verify!` (§6.12) needs it anyway - or the predicate and the command
+drift into exactly the disagreement §7 exists to prevent.
 
 ## 8. Execution
 
@@ -2288,7 +2322,7 @@ Estimates assume one experienced developer working from this plan.
 | **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                                                                         | §8, §5.11   | 2 d    |
 | **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`                                               | §9          | 2–3 d  |
 | **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                                                                             | §11         | 3 d    |
-| **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination                                                                                       | §12 Tier 1  | 3 d    |
+| **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination, `Operation#requestable_by?` (§7.2 †)                                             | §12 Tier 1  | 3 d    |
 | **M6b** |           | Show page: stage/quorum progress, payload preview and expander, timeline, action buttons, override form                                                                                                                    | §12 Tier 3  | 2–3 d  |
 | **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                                                              | §12 Tier 2  | 2–3 d  |
 | **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                          | §13         | 4 d    |
