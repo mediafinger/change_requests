@@ -299,4 +299,49 @@ RSpec.describe ChangeRequests::Request do
       expect(request.reload.current_stage).to eq(second)
     end
   end
+
+  # The attempts rows *are* the count; there is no counter column (§19.12). It answers "is there an
+  # attempt left", not "may this be executed" - Guards::Execute combines it with the status.
+  describe "#retryable?" do
+    it "is true for a request that has never been attempted" do
+      expect(request).to be_retryable
+    end
+
+    it "is false once the single default attempt is spent" do
+      request.attempts.create!(number: 1)
+
+      expect(request.reload).not_to be_retryable
+    end
+
+    it "counts rows against max_attempts" do
+      request = described_class.create!(**attributes, max_attempts: 3)
+      2.times { |i| request.attempts.create!(number: i + 1) }
+
+      expect(request.reload).to be_retryable
+
+      request.attempts.create!(number: 3)
+
+      expect(request.reload).not_to be_retryable
+    end
+
+    it "counts an attempt whatever its outcome, including one still in flight" do
+      request = described_class.create!(**attributes, max_attempts: 2)
+      request.attempts.create!(number: 1, outcome: "failed")
+      request.attempts.create!(number: 2) # claimed, not yet finished
+
+      expect(request.reload).not_to be_retryable
+    end
+
+    # Two reasons there is no zero case to defend against: max_attempts is `>= 1` by validation and
+    # CHECK, and it is readonly after create (§5.1, §19.12).
+    it "cannot be created permitting nothing" do
+      expect { described_class.create!(**attributes, max_attempts: 0) }
+        .to raise_error(ActiveRecord::RecordInvalid, /Max attempts/)
+    end
+
+    it "cannot be lowered afterwards" do
+      expect { request.update!(max_attempts: 5) }
+        .to raise_error(ChangeRequests::ReadonlyAttribute, /max_attempts/)
+    end
+  end
 end
