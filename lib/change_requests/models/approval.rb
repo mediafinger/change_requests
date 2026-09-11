@@ -26,7 +26,7 @@ module ChangeRequests
                                 inverse_of: :approval
     has_many :quorums, through: :approval_quorums, source: :quorum
 
-    actor_reference :approver
+    actor_reference :approver, identity: true
 
     validates :decided_at, presence: true
 

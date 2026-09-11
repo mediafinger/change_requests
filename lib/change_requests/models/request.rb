@@ -23,7 +23,7 @@ module ChangeRequests
     # so the row stays readable once the actor and the payload's records are gone.
     readonly_after_create :operation_key, :operation_version, :service, :method_name,
                           :payload, :payload_labels,
-                          :requester_type, :requester_id, :requester_label,
+                          :requester_type, :requester_id, :requester_label, :requester_identity,
                           :tenant_type, :tenant_id,
                           :max_attempts
 
@@ -37,7 +37,7 @@ module ChangeRequests
     has_many :attempts, -> { order(:number) },
              class_name: "ChangeRequests::Attempt", inverse_of: :change_request
 
-    actor_reference :requester
+    actor_reference :requester, identity: true
     actor_reference :executer, optional: true
     actor_reference :tenant, optional: true, registry: :tenant_types
 

@@ -43,7 +43,7 @@ module ChangeRequests
       # was handed. Rails refuses to lock a record carrying unsaved changes, so a caller cannot lose
       # an assignment it thought it was making.
       def call
-        request.with_lock { perform }
+        around_perform { perform }
       rescue ActiveRecord::RecordNotUnique => e
         refuse_conflict(e)
       rescue ActiveRecord::StaleObjectError
@@ -52,6 +52,11 @@ module ChangeRequests
 
       def perform
         fail NotImplementedError, "#{self.class.name} must implement #perform"
+      end
+
+      # Create overrides this: it has no row to lock until it has written one.
+      def around_perform(&)
+        request.with_lock(&)
       end
 
       # The single write path for events (§5.5), so the stamped columns are populated in one place.

@@ -321,8 +321,9 @@ RSpec.describe "the generated schema" do
 
     it "leaves the columns that are genuinely optional nullable" do
       optional = {
-        "change_requests" => %w(executer_type executer_id executer_label tenant_type tenant_id
-                                tenant_label expires_at executed_at overridden_at),
+        "change_requests" => %w(requester_identity executer_type executer_id executer_label
+                                tenant_type tenant_id tenant_label expires_at executed_at
+                                overridden_at),
         "change_request_quorums" => %w(name satisfied_at),
         "change_request_quorum_permissions" => %w(permission actor_type),
         "change_request_approvals" => %w(approver_identity comment),
