@@ -28,6 +28,11 @@ gem install change_requests
 
 TODO: Write usage instructions here
 
+## Architecture
+
+The decisions behind the gem's shape — and what each one costs — are recorded as ADRs in
+[docs/adr/](docs/adr/README.md).
+
 ## Development
 
 After checking out the repo, run `bin/setup` to install dependencies. Then, run `rake spec` to run the tests. You can also run `bin/console` for an interactive prompt that will allow you to experiment.
