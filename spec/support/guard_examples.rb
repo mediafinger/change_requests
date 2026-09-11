@@ -18,6 +18,8 @@ RSpec.shared_examples "a change request guard" do
   # by a removed declaration is exactly the one someone needs to leave a note on, and a comment
   # writes no lifecycle state (§5.11, I8).
   it "refuses an undeclared operation unless it is the exempt one (§5.11, I8)" do
+    guard # built while the declaration still stands: a request is created against a live one
+
     ChangeRequests.operations.clear
 
     if described_class.exempt_from_undeclared_operation
