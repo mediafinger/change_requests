@@ -93,9 +93,9 @@ module ChangeRequests
         # Unregistered classes are the allowlist's business, and actor_attributes raises for them.
         return if type.nil? || type.may_request
 
-        fail NotAuthorized,
-             "#{requester.class.name} may not raise change requests. " \
-             "Set `t.may_request = true` on its registration (§9.1)."
+        # No message: the reason carries it, so the text comes from the host's locale file and says
+        # nothing about `t.may_request` - a configuration key has no business in a flash (Q45).
+        fail NotAuthorized.new(reason: :may_not_request)
       end
 
       def write_request(declaration)

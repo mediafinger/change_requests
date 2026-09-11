@@ -3,7 +3,8 @@
 RSpec.describe ChangeRequests::Translation do
   # Since M1a-1 the gem requires ActiveRecord, which brings ActiveSupport, which brings i18n - so
   # I18n is always loaded and `available?` cannot be false in an ordinary process. The claim that
-  # matters is coping without a *translation*, which is every key until M1b-13.
+  # matters is coping without a *translation*: the gem ships config/locales/en.yml, but only the
+  # engine puts it on the load path, so a headless process still has nothing to look up.
   def self.headless
     <<~'RUBY'
       require "change_requests"

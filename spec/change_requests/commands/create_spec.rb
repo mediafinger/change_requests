@@ -126,7 +126,19 @@ RSpec.describe ChangeRequests::Commands::Create do
     it "refuses an actor type that does not declare may_request (§19.4)" do
       ChangeRequests.config.actor_types.fetch("Admin").may_request = false
 
-      expect { change_request }.to raise_error(ChangeRequests::NotAuthorized, /Admin/)
+      expect { change_request }.to raise_error(ChangeRequests::NotAuthorized) { |error|
+        expect(error.reason).to eq(:may_not_request)
+      }
+    end
+
+    # The message comes from the locale file, so it says nothing about `t.may_request` - a
+    # configuration key has no business in a flash the requester reads (Q45).
+    it "words the refusal for the person being refused" do
+      ChangeRequests.config.actor_types.fetch("Admin").may_request = false
+
+      expect { change_request }
+        .to raise_error(ChangeRequests::NotAuthorized,
+                        "Your kind of account cannot raise change requests.")
     end
 
     it "refuses an actor whose class is not registered at all (§9.1)" do

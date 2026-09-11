@@ -9,5 +9,9 @@
 /spec/reports/
 /tmp/
 
+# Rails writes these the moment anything boots an application - the dummy app, or a throwaway probe
+/log/
+/spec/dummy/log/
+
 # rspec failure tracking
 .rspec_status
