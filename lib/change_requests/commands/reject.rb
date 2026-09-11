@@ -26,9 +26,15 @@ module ChangeRequests
         record_decision
         emit(:rejected, body: reason, metadata: metadata)
 
-        stop unless config.only_record_rejections
+        if config.only_record_rejections
+          # The workflow continues, so the stage may still be satisfied by everyone else (§7.1).
+          EvaluateWorkflow.call(request: request)
+        else
+          # No evaluation after `stop`: the request is already `rejected` and final, and re-entering
+          # evaluation on it is at best a wasted query.
+          stop
+        end
 
-        # Commands::EvaluateWorkflow is M1b-12, and only the recorded-only branch would call it.
         request
       end
 
