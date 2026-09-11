@@ -32,6 +32,7 @@ module ChangeRequests
         already_finalized
         executing
         reason_required
+        body_required
         may_not_request
         not_approved
         attempts_exhausted
