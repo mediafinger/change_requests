@@ -29,7 +29,8 @@ module ChangeRequests
         already_decided
         not_the_approver
         not_permitted
-        finalized
+        already_finalized
+        executing
         reason_required
         may_not_request
         not_approved
@@ -78,10 +79,15 @@ module ChangeRequests
         refusal
       end
 
+      # One shared rule beside the declared class: a request that is already over is the same
+      # refusal whichever command met it, and the model's TerminalStateGuard raises exactly this
+      # with exactly this reason (§5.8). A host rescuing AlreadyFinalized catches both.
+      REASON_ERRORS = { already_finalized: AlreadyFinalized }.freeze
+
       def check!
         return request if allowed?
 
-        fail self.class.error_class.new(request: request, reason: reason)
+        fail error_for(reason).new(request: request, reason: reason)
       end
 
       # Subclasses override. nil permits.
@@ -113,6 +119,13 @@ module ChangeRequests
       # someone is an eligible approver: Approve, Reject, Cancel and Comment.
       def eligible_quorums
         @eligible_quorums ||= qualifying(stage&.quorums&.pending)
+      end
+
+      # §7.2's preamble: "eligible approver" means eligible for at least one quorum on *any* stage of
+      # this request, by permission or by name. A stage-three director may cancel or comment on a
+      # request sitting in stage one. Approve and Reject are the narrower, current-stage question.
+      def eligible_approver?
+        eligible_quorums.any? || eligible_on_another_stage?
       end
 
       # §6.9: a stage-three director sitting on a stage-one request is told to wait, not refused.
@@ -149,6 +162,10 @@ module ChangeRequests
       end
 
       private
+
+      def error_for(reason)
+        REASON_ERRORS.fetch(reason) { self.class.error_class }
+      end
 
       def qualifying(quorums)
         return [] if quorums.nil?
