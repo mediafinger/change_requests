@@ -27,8 +27,10 @@ module ChangeRequests
         decision.destroy!
 
         emit(:unapproved, metadata: metadata)
+        # A quorum that lost its threshold goes back to pending, and a stage whose last rejection
+        # this was reopens (§7.1).
+        EvaluateWorkflow.call(request: request)
 
-        # Commands::EvaluateWorkflow is M1b-12. Until it lands nothing re-counts the stage.
         request
       end
 

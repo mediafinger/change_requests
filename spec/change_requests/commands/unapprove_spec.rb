@@ -38,13 +38,19 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
       expect { approval.quorums.destroy_all }.to raise_error(ActiveRecord::ReadOnlyRecord)
     end
 
+    # A third approval would meet the threshold of 2 and close the stage, so this uses a workflow
+    # that still has room - the point is whose row goes, not what the evaluation then does.
     it "leaves other approvers' rows alone" do
+      ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(member_admin), required: 3)
+      spacious = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles",
+                                                       requester: requester)
       other = Admin.create!(name: "Ben", roles: %w(member_admin))
-      ChangeRequests::Commands::Approve.call(request: change_request.reload, actor: other)
+      ChangeRequests::Commands::Approve.call(request: spacious, actor: actor)
+      ChangeRequests::Commands::Approve.call(request: spacious.reload, actor: other)
 
-      unapprove
+      described_class.call(request: spacious.reload, actor: actor)
 
-      expect(change_request.reload.approvals.map(&:approver_id)).to eq([other.id.to_s])
+      expect(spacious.reload.approvals.map(&:approver_id)).to eq([other.id.to_s])
     end
   end
 
@@ -174,10 +180,35 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
     expect(unapprove).to eq(change_request)
   end
 
-  # Commands::EvaluateWorkflow is M1b-12. Until it lands nothing re-counts the stage.
-  it "leaves the request pending, because evaluation is M1b-12" do
-    unapprove
+  # Retracting a decision re-runs the evaluation inside the same lock (§7.1).
+  describe "the evaluation it triggers" do
+    it "leaves the request pending" do
+      unapprove
 
-    expect(change_request.reload.status).to eq("pending")
+      expect(change_request.reload.status).to eq("pending")
+    end
+
+    it "puts a quorum that lost its threshold back to pending" do
+      ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(member_admin), required: 1)
+      request = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles",
+                                                      requester: requester)
+      quorum = request.stages.sole.quorums.sole
+      quorum.update!(status: "satisfied", satisfied_at: Time.current)
+      request.stages.sole.approvals.create!(
+        change_request: request, approver: actor, decision: "approved", decided_at: Time.current
+      )
+
+      described_class.call(request: request.reload, actor: actor)
+
+      expect(quorum.reload).to have_attributes(status: "pending", satisfied_at: nil)
+    end
+
+    it "runs once" do
+      allow(ChangeRequests::Commands::EvaluateWorkflow).to receive(:call).and_call_original
+
+      unapprove
+
+      expect(ChangeRequests::Commands::EvaluateWorkflow).to have_received(:call).once
+    end
   end
 end

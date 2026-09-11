@@ -179,12 +179,32 @@ RSpec.describe ChangeRequests::Commands::Approve do
     expect(approve).to eq(change_request)
   end
 
-  # Commands::EvaluateWorkflow is M1b-12. Until it lands, an approval is recorded and counted but
-  # nothing advances the stage or the request.
-  it "leaves the request pending, because evaluation is M1b-12" do
-    approve
+  # Every approval runs the evaluation inside the same lock (§7.1). What it decides is M1b-12's
+  # spec; that it runs at all is this one's.
+  describe "the evaluation it triggers" do
+    it "leaves a request pending while the quorum is short of its threshold" do
+      approve
 
-    expect(change_request.reload.status).to eq("pending")
-    expect(change_request.current_stage_position).to eq(1)
+      expect(change_request.reload.status).to eq("pending")
+      expect(change_request.current_stage_position).to eq(1)
+    end
+
+    it "carries the request through to approved once the threshold is met" do
+      approve
+      described_class.call(request: change_request.reload,
+                           actor: Admin.create!(name: "Ben", roles: %w(member_admin)))
+
+      expect(change_request.reload.status).to eq("approved")
+      expect(change_request.stages.sole.status).to eq("closed")
+    end
+
+    it "runs inside the command's own lock, so the decision and its consequence commit together" do
+      allow(ChangeRequests::Commands::EvaluateWorkflow).to receive(:call).and_call_original
+
+      approve
+
+      expect(ChangeRequests::Commands::EvaluateWorkflow)
+        .to have_received(:call).with(request: change_request).once
+    end
   end
 end

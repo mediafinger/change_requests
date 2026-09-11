@@ -18,7 +18,9 @@ module ChangeRequests
     ).freeze
 
     # Inclusion only, no CHECK: every later milestone adds kinds, and a CHECK would make each one a
-    # migration in every host application (§19.16).
+    # migration in every host application (§19.16) - which is also why `stage_closed` could simply be
+    # dropped when it turned out nothing emitted it. Cooldown (M9b) puts a window between
+    # satisfaction and closing, and brings it back if it needs one (Q41).
     string_enum :kind, KINDS
 
     belongs_to :change_request, class_name: "ChangeRequests::Request", inverse_of: :events

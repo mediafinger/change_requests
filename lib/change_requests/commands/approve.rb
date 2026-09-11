@@ -23,8 +23,8 @@ module ChangeRequests
         approval = record_decision
         link(approval, guard.countable_quorums)
         emit(:approved, body: comment, metadata: metadata_for(approval))
+        EvaluateWorkflow.call(request: request)
 
-        # Commands::EvaluateWorkflow is M1b-12. Until it lands nothing advances the stage.
         request
       end
 
