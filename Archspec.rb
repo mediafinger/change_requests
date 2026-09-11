@@ -11,6 +11,7 @@ component :domain, in: [
   "lib/change_requests/configuration.rb",
   "lib/change_requests/configuration/**/*.rb",
   "lib/change_requests/errors.rb",
+  "lib/change_requests/testing.rb",
   "lib/change_requests/translation.rb",
   "lib/change_requests/version.rb",
   "lib/change_requests/authorization/**/*.rb",
