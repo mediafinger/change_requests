@@ -103,6 +103,11 @@ module ChangeRequests
         request.current_stage
       end
 
+      # Pluggable: the permission rows by default, or the host's own policy (§9.2).
+      def authorization
+        config.authorization
+      end
+
       # The acting actor as the columns store them. Raises UnknownActorType for an unregistered
       # class, which is the allowlist doing its job (§9.1).
       def actor_ref
