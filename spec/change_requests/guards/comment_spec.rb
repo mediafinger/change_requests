@@ -99,8 +99,9 @@ RSpec.describe ChangeRequests::Guards::Comment do
       }
     end
 
-    it "reads as the reason, not as an inspected hash" do
-      expect { guard.check! }.to raise_error(ChangeRequests::NotAuthorized, "not_permitted")
+    it "reads as the refusal, not as an inspected hash" do
+      expect { guard.check! }
+        .to raise_error(ChangeRequests::NotAuthorized, "You are not one of this request's approvers.")
     end
 
     # §8 keeps the two apart: "may never" is not "not yet", and a host rescues them separately.

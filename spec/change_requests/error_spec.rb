@@ -74,9 +74,13 @@ RSpec.describe ChangeRequests::Error do
       expect(error.i18n_key).to eq("change_requests.errors.already_decided")
     end
 
-    # §15.5: the domain core runs with no Rails, no engine and no locale files.
+    # §15.5: the domain core runs with no Rails, no engine and no locale files. The reason here is
+    # deliberately one the gem does not ship a translation for - config/locales/en.yml reaches
+    # I18n.load_path as soon as any spec boots the dummy app, and a claim about the fallback must
+    # not depend on which files ran first.
     it "falls back to the reason itself when nothing translates it" do
-      expect(error.message).to eq("already_decided")
+      expect(described_class.new(reason: :nothing_translates_this).message)
+        .to eq("nothing_translates_this")
     end
 
     it "translates the reason when I18n is available" do
@@ -104,7 +108,8 @@ RSpec.describe ChangeRequests::Error do
       subject(:error) { ChangeRequests::NotApprovable.new }
 
       it "still produces a message, naming itself" do
-        expect(error.message).to eq("not_approvable")
+        expect(error.message).to eq(I18n.t("change_requests.errors.not_approvable",
+                                           default: "not_approvable"))
       end
 
       it "keys off its own class name" do
@@ -119,7 +124,8 @@ RSpec.describe ChangeRequests::Error do
 
     it "is raisable with the bare class, like any StandardError" do
       expect { fail ChangeRequests::NotCancelable }
-        .to raise_error(ChangeRequests::NotCancelable, "not_cancelable")
+        .to raise_error(ChangeRequests::NotCancelable,
+                        I18n.t("change_requests.errors.not_cancelable", default: "not_cancelable"))
     end
 
     it "is raisable with a message, like any StandardError" do
@@ -144,7 +150,8 @@ RSpec.describe ChangeRequests::Error do
     end
 
     it "words its message from the reason, not from the keywords it was handed" do
-      expect(error.message).to eq("not_permitted")
+      expect(described_class.new(request: :a_request, reason: :nothing_translates_this).message)
+        .to eq("nothing_translates_this")
     end
 
     it "still accepts a plain message, which Commands::Create raises it with" do

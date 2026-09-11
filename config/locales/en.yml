@@ -1,0 +1,55 @@
+# Every message a guard or a command can put in front of a person (§7, §5.9).
+#
+# `reason` is the contract - controllers branch on the symbol, views render it as a disabled
+# button's tooltip - and these strings are what the tooltip says. They are written for the person
+# being refused, not for the developer reading a log: none of them names a configuration key.
+#
+# Nothing here is required. `ChangeRequests::Translation` passes a usable default to every lookup,
+# so the domain core keeps working with no locale file loaded at all - which is exactly what the
+# headless spec asserts, where the message *is* the reason symbol.
+en:
+  change_requests:
+    errors:
+      # One key per entry of Guards::Base::REASONS.
+      already_decided: "You have already decided this step."
+      already_finalized: "This request is already finished."
+      attempts_exhausted: "This request has used all of its attempts."
+      body_required: "A comment needs something in it."
+      executing: "This request is running right now."
+      may_not_request: "Your kind of account cannot raise change requests."
+      not_approved: "This request has not been approved yet."
+      not_expirable: "Only a pending or approved request can expire."
+      not_expired: "This request has not reached its expiry date."
+      not_pending: "This request is no longer open for decisions."
+      not_permitted: "You are not one of this request's approvers."
+      not_system: "Expiry is the clock's to decide, not yours."
+      not_the_approver: "You can only take back your own decision."
+      operation_undeclared: "This request's operation no longer exists, so it can never run."
+      reason_required: "A reason is required."
+      requester: "You cannot decide on your own request."
+      stage_not_current: "This step is not the one waiting on you."
+      stage_not_open: "This step is closed."
+
+      # One key per error class that carries a reason, used when a caller raises without one -
+      # Refusal#i18n_key falls back to the class name underscored.
+      not_approvable: "This request cannot be approved."
+      not_authorized: "You are not allowed to do that."
+      not_cancelable: "This request cannot be cancelled."
+      not_executable: "This request cannot be executed."
+      not_rejectable: "This request cannot be rejected."
+      not_unapprovable: "This decision cannot be taken back."
+      override_not_permitted: "You are not allowed to override the approvals."
+      quorum_not_met: "This request does not have the approvals it needs."
+      transition_error: "This request will not accept that."
+
+    # Stage and quorum names are declaration identifiers, not display text (§5.9). A host adds a key
+    # per name it declares; anything unlisted falls back to `name.humanize`, so "sign_off" reads as
+    # "Sign off" with no locale entry at all.
+    #
+    #   stages:
+    #     sign_off: "Director sign-off"
+    #   quorums:
+    #     owners: "Owners"
+    stages:
+      # The only name the gem itself creates - `op.approvals` builds one stage called this.
+      approval: "Approval"
