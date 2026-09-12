@@ -22,8 +22,16 @@ RSpec.describe "Dummy::Application" do
   end
 
   describe "the registered actor types" do
-    it "registers three, because one tidy User class would hide the problem the schema solves" do
-      expect(ChangeRequests.config.actor_types.keys).to contain_exactly("User", "Admin", "Manager")
+    it "registers four, because one tidy User class would hide the problem the schema solves" do
+      expect(ChangeRequests.config.actor_types.keys)
+        .to contain_exactly("User", "Admin", "Manager", "Director")
+    end
+
+    # Four classes, three key types: Director exists to be gated on by §6.9's `actor_type:` shapes,
+    # and shares Admin's key so it adds a class the gem has never heard of and nothing else.
+    it "spans three key types across them, which is what the schema exists to prove" do
+      expect(ChangeRequests.config.actor_types.values.map(&:key_type).uniq)
+        .to contain_exactly(:uuid, :integer, :string)
     end
 
     it "registers a tenant type" do
@@ -33,7 +41,8 @@ RSpec.describe "Dummy::Application" do
     it "declares each actor's key type, which is how the resolver casts an id back (§5.7)" do
       key_types = ChangeRequests.config.actor_types.transform_values(&:key_type)
 
-      expect(key_types).to eq("User" => :uuid, "Admin" => :integer, "Manager" => :string)
+      expect(key_types)
+        .to eq("User" => :uuid, "Admin" => :integer, "Manager" => :string, "Director" => :integer)
     end
 
     it "labels each class differently, so a snapshot cannot be mistaken for a lookup" do
