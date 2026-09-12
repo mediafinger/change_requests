@@ -160,12 +160,27 @@ RSpec.describe ChangeRequests::Commands::Cancel do
       expect(change_request.reload.status).to eq("pending")
     end
 
-    it "refuses an operation that is no longer declared (§5.11)" do
+    # §5.11, Q9: cancelling stays open once the declaration is gone - and to anyone, because a
+    # request that can never run is not worth adjudicating who may tidy it away.
+    it "cancels an operation that is no longer declared, whoever asks (§5.11)" do
       change_request # created against a live declaration, which then disappears
       ChangeRequests.operations.clear
 
+      expect do
+        described_class.call(request: change_request, actor: Admin.create!(name: "Nobody"),
+                             reason: "stranded")
+      end
+        .not_to raise_error
+      expect(change_request.reload.status).to eq("canceled")
+    end
+
+    it "still refuses a request whose target is mid-flight, undeclared or not" do
+      change_request.update!(status: "executing")
+
+      ChangeRequests.operations.clear
+
       expect { cancel }.to raise_error(ChangeRequests::NotCancelable) { |error|
-        expect(error.reason).to eq(:operation_undeclared)
+        expect(error.reason).to eq(:executing)
       }
     end
   end

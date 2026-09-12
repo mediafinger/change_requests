@@ -53,6 +53,24 @@ module ChangeRequests
       where(status: %w(pending approved)).where(expires_at: ...now)
     }
 
+    # What Maintenance.reap_stuck_executions! sweeps (§8): claimed, and nothing ever settled the
+    # attempt. Inclusive at the cutoff, as Guards::Reap is - a spec asserts the two agree.
+    scope :stuck_executions, lambda { |older_than = Guards::Reap::DEFAULT_STUCK_AFTER|
+      claimed = Attempt.in_flight.where(started_at: ..(Time.current - older_than))
+
+      where(status: "executing").where(id: claimed.select(:change_request_id))
+    }
+
+    # What Maintenance.cancel_undeclared! sweeps (§5.11). `executing` is excluded deliberately:
+    # Guards::Cancel refuses a request mid-flight, and being undeclared does not make it
+    # recallable - the reaper is what clears those.
+    scope :undeclared, lambda {
+      declared = ChangeRequests.operations.keys
+      candidates = where(status: OPEN_STATUSES - %w(executing))
+
+      declared.empty? ? candidates : candidates.where.not(operation_key: declared)
+    }
+
     def current_stage
       stages.find_by(position: current_stage_position)
     end

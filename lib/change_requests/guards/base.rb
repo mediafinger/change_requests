@@ -36,6 +36,8 @@ module ChangeRequests
         may_not_request
         not_approved
         attempts_exhausted
+        not_executing
+        not_stuck
         not_expired
         not_expirable
         not_system
