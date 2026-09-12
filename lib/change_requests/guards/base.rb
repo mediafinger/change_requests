@@ -81,10 +81,16 @@ module ChangeRequests
         refusal
       end
 
-      # One shared rule beside the declared class: a request that is already over is the same
-      # refusal whichever command met it, and the model's TerminalStateGuard raises exactly this
-      # with exactly this reason (§5.8). A host rescuing AlreadyFinalized catches both.
-      REASON_ERRORS = { already_finalized: AlreadyFinalized }.freeze
+      # Reasons the taxonomy gives a class of their own, raised in place of the guard's declared
+      # one. `already_finalized`: a request that is already over is the same refusal whichever
+      # command met it, and the model's TerminalStateGuard raises exactly this with exactly this
+      # reason (§5.8), so a host rescuing AlreadyFinalized catches both. `override_not_permitted`:
+      # §8.1's break-glass refusal is not an ordinary NotExecutable, and a host alerting on
+      # attempted overrides rescues it by name.
+      REASON_ERRORS = {
+        already_finalized: AlreadyFinalized,
+        override_not_permitted: OverrideNotPermitted,
+      }.freeze
 
       def check!
         return request if allowed?
