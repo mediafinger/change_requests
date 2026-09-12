@@ -118,12 +118,14 @@ change_requests/
 │       │   └── attempt.rb
 │       ├── operations.rb                     # the collection: define, [], keys, verify!
 │       ├── operation.rb                      # one entry
+│       ├── operation/override.rb            # §8.1's break-glass declaration - op.override
 │       ├── workflow.rb                       # the description op.workflow builds - stages + quorums
 │       ├── guards/                            # allowed? + reason, shared by commands AND presenters
-│       │   ├── base.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
+│       │   ├── base.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb reap.rb
 │       │   └── (no create.rb - Create has no request to guard; see §7.2)
 │       ├── commands/                          # guard + mutate + emit event, inside with_lock
 │       │   ├── base.rb create.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
+│       │   ├── claim_execution.rb settle_execution.rb  # §8's T1 and T3 - internal, run by the runner
 │       │   ├── override.rb                   # Execute with override: true, named so it reads as one - §8.1
 │       │   ├── cancel_undeclared.rb          # Cancel, emitting operation_undeclared instead - §5.11
 │       │   └── evaluate_workflow.rb          # advance the workflow after a decision - §7.1
@@ -132,6 +134,7 @@ change_requests/
 │       │   └── callable.rb                    # wraps any ->(actor:, request:, action:) {}
 │       ├── execution/
 │       │   ├── dispatcher.rb                  # operation lookup + invoke
+│       │   ├── target_contract.rb             # §6.12's contract - read by verify! and by dispatch
 │       │   ├── runner.rb                      # attempt bookkeeping, idempotency, retry ceiling
 │       │   ├── job.rb                         # ActiveJob, only defined if ActiveJob is present
 │       │   └── close_stage_job.rb             # ActiveJob, cooldown fast path - §7.1
@@ -158,6 +161,9 @@ change_requests/
 │   ├── routes.rb
 │   └── locales/en.yml
 │
+├── lib/tasks/
+│   └── change_requests.rake                   # change_requests:verify, plus M3b's sweepers
+│
 ├── lib/generators/change_requests/
 │   ├── install/         install_generator.rb + templates/{initializer.rb.tt,operations.rb.tt,migration.rb.tt,spec_support.rb.tt}
 │   ├── action/          action_generator.rb  + templates/{action.rb.tt,action_spec.rb.tt}
@@ -179,9 +185,10 @@ authorization,execution,presenters}` may reference `ActionController`, `ActionVi
 under `app/`. `spec/integration/headless_spec.rb` proves it by booting the core against a bare ActiveRecord
 connection with `Rails` undefined.
 
-**Autoloading:** `Zeitwerk::Loader.for_gem` over `lib/`, with `lib/generators` and `lib/change_requests/rspec.rb`
-ignored (generators are loaded by Rails' own generator lookup; the test kit is explicitly required). The
-existing `zeitwerk` runtime dependency in the gemspec is correct and stays.
+**Autoloading:** `Zeitwerk::Loader.for_gem` over `lib/`, with `lib/generators`, `lib/tasks` and
+`lib/change_requests/rspec.rb` ignored (generators are loaded by Rails' own generator lookup, `.rake` files
+by the engine's `lib/tasks` path, and the test kit is explicitly required). The existing `zeitwerk` runtime
+dependency in the gemspec is correct and stays.
 
 `models/` and `presenters/` are **collapsed** - `loader.collapse("lib/change_requests/models")` and the same
 for `presenters` - so `models/request.rb` defines `ChangeRequests::Request` and
@@ -804,8 +811,8 @@ The README recommends two conventions:
 A request whose `operation_key` is no longer declared (meaning: someone changed or removed the `ChangeRequests.operation`) can never execute - dispatch resolves the operation
 live, and the allowlist refuses. Such a request is not partially workable, it is finished:
 
-- **Every guard refuses, except `Comment` and `Cancel`.** Approve, unapprove, reject, execute and override
-  all fail with `ChangeRequests::UnknownOperation`. Approving something that can never run wastes approver
+- **Every guard refuses, except `Comment`, `Cancel` and `Reap`.** Approve, unapprove, reject, execute and
+  override all fail with `ChangeRequests::UnknownOperation`. Approving something that can never run wastes approver
   attention and writes a misleading audit record.
   - **Commenting stays open**: a request stranded by a removed declaration is exactly the one someone needs
     to leave a note on, and a comment writes no lifecycle state (§5.5). The `commented` event records the
@@ -815,6 +822,10 @@ live, and the allowlist refuses. Such a request is not partially workable, it is
     it clearable only by a rake task means a stranded row sits in the table until an operator notices.
     `Guards::Cancel` still refuses a request that is already final or mid-execution - being undeclared does
     not make it recallable.
+  - **Reaping stays open too.** Whether the declaration still exists has no bearing on "this attempt died
+    and nobody will ever settle it". `Guards::Cancel` refuses an `executing` request (§8), so a request
+    claimed just as its declaration vanished would otherwise be reachable by no sweeper at all -
+    `Maintenance.reap_stuck_executions!` writes it off to `failed`, and it is then ordinarily cancelable.
 - **It is invisible as open work.** `visible_to`, `awaiting_approval_from` and the default index scope all
   exclude requests with no live declaration, so it leaves inboxes and badges immediately, before any
   cleanup runs.
@@ -937,6 +948,10 @@ ChangeRequests.operations.define "members.update_roles" do |op|
   op.cooldown     = 0                          # minutes a decided stage stays reversible - §7.1
 end
 ```
+
+> `op.cooldown` is **not built yet**. It arrives with M9b, together with `CloseStageJob` and the
+> reversibility window it measures; until then every decided stage closes in the same breath, which is
+> cooldown `0`. Declaring it today raises `NoMethodError`.
 
 **`op.workflow` is the only way to declare who approves.** A stage with one counting rule takes its
 `permissions` and `threshold` inline; §6.9 adds the block form for stages holding more than one. There is
@@ -1155,15 +1170,17 @@ end
 Creating and approving is unchanged - only the sequence of people differs:
 
 ```ruby
-request = ChangeRequests.request!("payouts.release", payload: { payout_id: }, requester: alice)
+request = ChangeRequests.request!("budget.approve", payload: { budget_id: }, requester: alice)
 
-Approve.call(request:, actor: director_alan)   # => NotApprovable (reason: :stage_not_current)
+Approve.call(request:, actor: director_alan)    # => NotApprovable (reason: :stage_not_current)
 
-Approve.call(request:, actor: support_sam)     # stage 1 satisfied
-Approve.call(request:, actor: risk_rita)       # risk  ✓
-Approve.call(request:, actor: finance_fay)     # money 60% ✓
-Approve.call(request:, actor: cfo)             # named ✓ → stage 2 satisfied
-Approve.call(request:, actor: director_alan)   # → "approved"
+Approve.call(request:, actor: support_sam)      # triage ✓ → stage 2
+Approve.call(request:, actor: risk_rita)        # risk  ✓  - she holds both, and match: :all
+Approve.call(request:, actor: finance_fay)      # money 1 of 2
+Approve.call(request:, actor: finance_frank)    # money ✓
+Approve.call(request:, actor: cfo)              # named 1 of 2
+Approve.call(request:, actor: general_counsel)  # named ✓ → approval ✓ → stage 3
+Approve.call(request:, actor: director_alan)    # → "approved"
 
 Execute.call(request:, actor: ops_olive)
 ```
@@ -1247,10 +1264,14 @@ it is worth saying what it buys:
    rather than declared per action, because a flag saying "this one is not" would only have meant "do not
    retry it", which `max_attempts = 1` already says.
 6. **Boot-time verification.** `rake change_requests:verify` (and `to_prepare` in dev/test) asserts every
-   service constant resolves, every operation declares a `version`, every quorum declares a positive
-   `threshold`, no `all_quorums` stage is unsatisfiable, and no `cooldown` is declared without ActiveJob.
-   Verification checks the *singleton* method that dispatch will actually call, so an ordinary
-   `def self.call` target is validated against how it is invoked.
+   service constant resolves, every operation declares a `version`, a `service` and a non-empty workflow,
+   and every quorum declares a positive `threshold`. Verification checks the *singleton* method that
+   dispatch will actually call, so an ordinary `def self.call` target is validated against how it is
+   invoked - and that it takes **keyword arguments only**, the half of the target contract below that is
+   checkable. `Execution::TargetContract` is that check, read by `verify!` at boot and by
+   `Execution::Dispatcher` at dispatch, so the two cannot word the same defect differently. Two further
+   checks - no `all_quorums` stage is unsatisfiable, no `cooldown` without ActiveJob - are **not built**;
+   both need a decision first (§17.1).
 
 **The service contract, documented explicitly** (neither source documented it, and both broke on it):
 
@@ -1505,9 +1526,10 @@ sitting in stage one.
 | `Execute`            | any actor permitted by the separation-of-duties config                                            | `approved`, or `failed` and retryable                                                   | §8                                                                                      |
 | `Execute` + override | actor satisfying `op.override` permissions, not the requester                                     | request non-final and not already `executing`; reason present                           | §8.1                                                                                    |
 | `Expire`             | system only                                                                                       | `pending` or `approved` past `expires_at`                                               | request `expired`                                                                       |
+| `Reap`               | system only                                                                                       | `executing`, its attempt unfinished and older than `older_than`                        | request `failed`, attempt `abandoned` - §8                                              |
 
-Every guard except `Comment` and `Cancel` additionally refuses when the operation is no longer declared
-(§5.11).
+Every guard except `Comment`, `Cancel` and `Reap` additionally refuses when the operation is no longer
+declared (§5.11).
 
 **† `Create` is the one row with no guard object.** A guard is `(request:, actor:)` - "may this actor do
 this *to this row*" - and at creation there is no row. `Commands::Create` therefore performs its own three
@@ -1617,12 +1639,33 @@ metadata: { approvals_present: 1, approvals_required: 2,
             incomplete_stages: ["operational"], incomplete_quorums: ["owners"] }
 ```
 
+**The shortfall is scoped to what was still missing**, not to the whole workflow: `approvals_required` sums
+the thresholds of the *incomplete* quorums and `approvals_present` the approvals counted toward those, so a
+satisfied quorum drops out of both. On a three-stage request that got through two, the numbers describe the
+gap the override actually crossed rather than the size of the policy. A nameless quorum is omitted from
+`incomplete_quorums` rather than listed as null, as every other event does (§5.9).
+
 Recording it at claim time matters: a later approval must not be able to make an override look
 retrospectively unnecessary.
 
-**Guarding it.** `Guards::Execute` gains an override branch - `override_allowed?` requires the action to
-declare `op.override`, the actor to satisfy those permissions, and a reason when `require_reason`. The
-request must be non-final and not already `executing`. `config.requester_may_override` defaults to `false`
+**Guarding it.** `Guards::Execute` gains an override branch - `override_refusal`, answered instead of the
+ordinary one rather than as a relaxation of it, because "may this actor suspend the gem's central promise on
+this action" is a different question. It requires the action to declare `op.override` and the actor to
+satisfy those permissions; an override declaring no permissions is open to anyone whose type `may_execute`,
+which is a declaration and not an oversight.
+
+**The request must be `pending`.** An `approved` or `failed` request executes by the ordinary path - "an
+actor who could execute normally does so" - so recording an override for one would put a badge, an event and
+an `overridden_at` on a request that needed none. It is refused `:not_pending`, which is also what keeps T1's
+`WHERE status = 'pending'` from surfacing as a far less clear `ExecutionInProgress`.
+
+The mandatory reason is **not** part of the guard: `Commands::ClaimExecution` checks it immediately after the
+guard passes, following the shape `Reject` and `Cancel` already use, so someone who may not override at all
+is not told they merely forgot a sentence.
+
+`:override_not_permitted` raises `OverrideNotPermitted` rather than the guard's declared `NotExecutable` -
+`Guards::Base::REASON_ERRORS` maps it, as it does `:already_finalized`, so a host alerting on attempted
+overrides rescues them by name. `config.requester_may_override` defaults to `false`
 and a host that turns it on should know what it is buying: a requester who can override their own request
 has not been slowed down by the gem at all. Unlike approval - which is never the requester's to give (§8) -
 an override is already an accountable, reasoned, separately permissioned exception that lands in the audit
@@ -2329,7 +2372,8 @@ Plus a static check that no file under the domain directories mentions `ActionCo
 - Rejection with a mandatory reason, stopping the request by default or recorded only
 - Stage closing: a satisfied stage becomes immutable, with no rollback into earlier stages
 - Terminal-state protection at the model layer
-- Undeclared operations refused by every guard, hidden from open work, closed out by a rake task
+- Undeclared operations refused by every guard but `Comment`, `Cancel` and `Reap`, hidden from open
+  work, closed out by a rake task an operator runs
 - Append-only `change_request_events` audit trail with actor attribution and typed kinds
 - Snapshotted labels (`requester_label`, `payload_labels`) that survive deletion of the actor or the
   referenced record
@@ -2374,9 +2418,9 @@ Estimates assume one experienced developer working from this plan.
 | **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **Shipped**                                                                                                                                                                                        | §1, §2, §15 | 5 d    |
 | **M1a** |           | Migrations for all nine tables, **written as the install-generator template**, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability. **Shipped**                                                                                                                                                | §4, §5      | 7 d    |
 | **M1b** | 0.2.0     | Guards for the whole §7.2 table, and commands for all of it **except `Execute`**; a minimal `Operations`/`Operation` pulled forward from M2; `with_lock`; sequential multi-stage, single-quorum evaluation; error taxonomy. **Shipped**, plus the `all_quorums` satisfaction rule (§7.1) - whose linking half is still M9a's, see §17.1 | §7          | 11 d   |
-| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL — which **replaces** M1b's `op.approvals` shorthand — plus `op.cooldown`, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry and materialise-on-create landed early, in M1b                                                                                | §6.4, §6.12 | 4.5 d  |
-| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, `Commands::Override` and the §8.1 branch. **Concurrency specs.** `Guards::Execute` landed in M1b                                                                                                                               | §8, §15.3   | 4.5 d  |
-| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!` and `Commands::CancelUndeclared`, rake tasks                                                                                                                                                                                                     | §8, §5.11   | 2.25 d |
+| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL — which **replaced** M1b's `op.approvals` shorthand — plus `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry and materialise-on-create landed early, in M1b; `op.idempotent` was removed rather than wired in. **Shipped.** `op.cooldown` moved to M9b, which is where the window it measures is built                | §6.4, §6.12 | 4.5 d  |
+| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, `Commands::Override` and the §8.1 branch. **Concurrency specs.** `Guards::Execute` landed in M1b. **Shipped**                                                                                                                  | §8, §15.3   | 4.5 d  |
+| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!` and `Commands::CancelUndeclared`, the maintenance rake tasks and `docs/05`. **Shipped**                                                                                                                                                          | §8, §5.11   | 2.25 d |
 | **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`                                                                                                                                                            | §9          | 2–3 d  |
 | **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                                                                                                                                                                                          | §11         | 3 d    |
 | **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination, `Operation#requestable_by?` (§7.2 †)                                                                                                                                                              | §12 Tier 1  | 3 d    |
@@ -2384,10 +2428,10 @@ Estimates assume one experienced developer working from this plan.
 | **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                                                                                                                                                                           | §12 Tier 2  | 2–3 d  |
 | **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                                                                                                                                       | §13         | 4 d    |
 | **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                                                                                                                                                                           | §14         | 3–4 d  |
-| **M9a** |           | Multi-quorum evaluation: one-quorum-per-approval linking, per-quorum `quorum_satisfied` timing, named approvers. `any_quorum`, `all_quorums` satisfaction, sequential stage advance and stage closing land in M1b. **Carries two correctness gaps, not only features - must land before or with M2** (§17.1)                            | §7.1        | 2–3 d  |
+| **M9a** |           | Multi-quorum evaluation: one-quorum-per-approval linking, per-quorum `quorum_satisfied` timing, named approvers. `any_quorum`, `all_quorums` satisfaction, sequential stage advance and stage closing landed in M1b. **Carries two correctness gaps, not only features, and they are live from 0.3.0** (§17.1)                          | §7.1        | 2–3 d  |
 | **M9b** |           | `op.cooldown` over both decisions: `CloseStageJob`, unapproval inside the window, a rejected stage returning to `pending` when its last rejection is withdrawn, `close_due_stages!` fallback                                                                                                                                            | §7.1        | 2–3 d  |
 | **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                                                                                                                                                                                        | §5.3, §11   | 2 d    |
-| **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                                                                                                                                                                                         | §10         | 2–3 d  |
+| **M10** | 0.11.0    | Notifications: `on_event` after_commit, `ActiveSupport::Notifications`, and `docs/08`'s worked example. The maintenance rake tasks shipped early, in M3b                                                                                                                                                                                | §10         | 2–3 d  |
 | **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                                                                                                                                                                                     | -           | 4–5 d  |
 
 **Total: roughly 10-12 focused weeks**, or 5-6 months at one day a week.
@@ -2403,29 +2447,36 @@ mean rewriting `EvaluateWorkflow` in M9a rather than extending it.
 the grounds that a stage declared "1 Admin AND 2 Owners" must not close on the Admin alone. The *linking*
 rule that makes the same sentence true for one person holding both roles stayed in M9a, so the hole it was
 closing is still open from the other side (§5.3), and the per-quorum event timing went with it (§7.1).
-Neither is reachable while `op.approvals` is the only declaration syntax - **and M2 is what ends that**.
-Shipping M2 ahead of M9a makes both silently reachable in 0.3.0 and leaves them there until 0.10.0.
+Neither was reachable while `op.approvals` was the only declaration syntax - **and M2 ended that**.
 
-**That is the accepted trade** (§17.1): nothing is released, no host can meet the gap, and reordering seven
-milestones or refusing a shape the docs describe both cost more than carrying it. What the decision buys is
-that it must not be carried *silently* - `Plan_M2.md` M2-6 pins it as a pending spec naming M9a, so the
-suite reddens when M9a closes it rather than the gap being noticed by a host.
+**That trade is now taken, not pending** (§17.1). `all_quorums` has been declarable since 0.3.0, so a stage
+declared "one Admin AND two Owners" closes on two people where its own prose says three, and it stays that
+way until M9a. Nothing is released to a host that could meet it, and reordering seven milestones cost more
+than carrying it - but it is carried in the open: `spec/change_requests/workflow/shapes_spec.rb` holds it as
+a **pending example naming M9a**, which reddens the moment M9a makes it pass. That tripwire is the reason
+M9a cannot quietly slip.
+
+**M9a is now the oldest known defect in the gem**, and the case for pulling it ahead of M4 and M5 is
+stronger than it was when the trade was made: every milestone after it adds surface that renders or reports
+quorum state.
 
 ### 17.1 Gaps to close before ticketing those parts
 
 Everything else in the table is specified well enough that tickets can be written from the referenced
-sections. These seven are not, and each needs a decision rather than more prose. Two are now closed, struck below,
-and left in place because the reasoning behind a closed question is worth as much as the answer:
+sections. The rows below are not, and each needs a decision rather than more prose. Closed ones are struck
+through and left in place, because the reasoning behind a closed question is worth as much as the answer:
 
-| Part             | What is missing                                                                                                                                                                                                                                                                                                                                                                               |
-|------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| ~~**M2 / M9a**~~ | **Closed: M2 ships first and M9a keeps the linking rule.** Nothing is released, so `all_quorums` is declarable and knowingly incomplete between 0.3.0 and M9a rather than reordering seven milestones or teaching `verify!` to refuse a shape the docs describe. `Plan_M2.md` M2-6 carries a pending spec naming M9a, so the gap is visible in the suite and reddens the moment it is closed. |
-| ~~**M2**~~       | **Closed: the same as `Configuration#validate!`** - one raised error listing every problem, so a host that has seen one of these has seen both.                                                                                                                                                                                                                                               |
-| **M5**           | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                                                                                                                                                                                                                                                      |
-| **M6b**          | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.                                                                                                                                                                                                                                                  |
-| **M7**           | `scaffold_ui` output is one line. Which files, in which namespace, with which route helpers and layout assumptions.                                                                                                                                                                                                                                                                           |
-| **M10**          | The object handed to `config.on_event` is unspecified - the `Event` record, a value object, or a payload hash, and which associations are preloaded on it.                                                                                                                                                                                                                                    |
-| **M4**           | `key_type` casting rules: what `:string` means for a non-integer, non-uuid PK, and what `finder` is expected to return for ids that no longer resolve.                                                                                                                                                                                                                                        |
+| Part             | What is missing                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ~~**M2 / M9a**~~ | **Closed: M2 ships first and M9a keeps the linking rule.** Nothing is released, so `all_quorums` is declarable and knowingly incomplete between 0.3.0 and M9a rather than reordering seven milestones or teaching `verify!` to refuse a shape the docs describe. `Plan_M2.md` M2-6 carries a pending spec naming M9a, so the gap is visible in the suite and reddens the moment it is closed.                                                                                                                                                                                                              |
+| ~~**M2**~~       | **Closed: the same as `Configuration#validate!`** - one raised error listing every problem, so a host that has seen one of these has seen both.                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| **M2 / M9a**     | §6.12 point 6 requires `verify!` to refuse an **unsatisfiable `all_quorums` stage**, and never defines unsatisfiable. Eligibility stops being statically decidable as soon as permission rows are involved, since permissions are a host runtime question - the only decidable case is a quorum that names actors, declares no permission rows, and names fewer of them than its threshold. Worth deciding alongside M9a, which is the milestone that makes `all_quorums` mean what it says. |
+| ~~**M2 / M9b**~~ | **Closed: `op.cooldown` belongs to M9b**, with `CloseStageJob` and the window it measures. `Plan_M2.md` §1 had it in M2 while §2's table assigned it to M9b and §3's build order gave it no ticket; §17 and §19.9 now say M9b throughout. `verify!`'s "no cooldown without ActiveJob" check ships with the attribute, not before it.                                                                                                                                          |
+| **M5**           | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **M6b**          | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **M7**           | `scaffold_ui` output is one line. Which files, in which namespace, with which route helpers and layout assumptions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| **M10**          | The object handed to `config.on_event` is unspecified - the `Event` record, a value object, or a payload hash, and which associations are preloaded on it.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **M4**           | `key_type` casting rules: what `:string` means for a non-integer, non-uuid PK, and what `finder` is expected to return for ids that no longer resolve.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## 18. Cut line for 1.0
 
@@ -2460,8 +2511,9 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
 8. **Gem name availability** `change_requests` - has been reserved on RubyGems by releasing a first version without implementation.
 9. **A minimal `Operations`/`Operation` ships in M1b, not M2.** Every guard checks that the operation is
    still declared (§5.11) and `Create` cannot write `service`, `method_name` or `operation_version` without
-   a registry. M1b gets `define`/`[]`/`keys`, those attributes, and the `op.approvals` shorthand; M2 adds
-   the full `op.workflow` DSL, `op.cooldown`, `verify!` and `ChangeRequests.request!`.
+   a registry. M1b got `define`/`[]`/`keys`, those attributes, and the `op.approvals` shorthand; M2 added
+   the full `op.workflow` DSL, `verify!` and `ChangeRequests.request!`, and removed the shorthand along
+   with `op.idempotent`. `op.cooldown` went with the window it measures, to M9b.
 10. **`Guards::Execute` ships in M1b; `Commands::Execute` and the override branch ship in M3a.** The guard's
     inputs are all M1 state; the claim-then-invoke machinery is not.
 11. **Every gem-owned key is a uuid** (§5.7). All nine tables and every foreign key between them are
@@ -2472,7 +2524,11 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
 12. **No `attempts_count` column.** `change_request_attempts` rows are the count (§5.6).
 13. **No `idempotency_key` column.** The request's own id is handed to targets that declare a
     `change_request_id:` keyword, and the `executing` claim is what prevents double execution (§8).
-14. **`Comment` is exempt from the undeclared-operation refusal** (§5.11), and `Cancel` requires a reason.
+14. **`Comment`, `Cancel` and `Reap` are exempt from the undeclared-operation refusal** (§5.11), and
+    `Cancel` requires a reason. Comment, because a stranded request is the one worth annotating; Cancel,
+    because it is the one worth clearing away, and to anyone; Reap, because a claim that died is dead
+    whatever the registry says - and `Cancel` refuses an `executing` request, so without the third
+    exemption such a row could be cleared by nothing at all.
 15. **Events carry a `System` sentinel actor**, never a NULL: `type "System"`, `id "system"`,
     `label "System"`.
 16. **`kind` is a validation, not a CHECK constraint.** Later milestones add kinds; a CHECK would make each
