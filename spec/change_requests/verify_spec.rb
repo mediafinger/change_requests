@@ -30,6 +30,12 @@ module VerifyProbes
       end
     end
   end
+
+  class Positional
+    def self.call(member_id)
+      member_id
+    end
+  end
 end
 
 # rubocop:disable-next RSpec/DescribeClass
@@ -97,6 +103,14 @@ RSpec.describe "ChangeRequests.operations.verify! (§6.12 point 6)" do
       define(service: "VerifyProbes::Perform", method_name: :perform)
 
       expect(operations.problems).to be_empty
+    end
+
+    # M3a-1: the contract is keyword arguments only, and that is knowable at boot rather than on
+    # the first execution of a request someone has already approved (§6.12).
+    it "refuses a target taking positional arguments, naming the contract" do
+      define(service: "VerifyProbes::Positional")
+
+      expect(operations.problems.join).to match(/takes positional arguments.*keyword arguments only/)
     end
 
     it "refuses a declared method_name the target does not answer" do

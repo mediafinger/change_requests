@@ -73,17 +73,12 @@ module ChangeRequests
        *threshold_problems].compact
     end
 
-    # What needs the host's classes loaded, so it runs at boot and nowhere else: the constant
-    # resolves, and it answers the singleton method dispatch will call (§6.12 point 6).
+    # What needs the host's classes loaded, so it runs at boot and nowhere else: the §6.12 target
+    # contract, in the words `Execution::Dispatcher` would use for the same defect.
     def target_problems
       return [] if service.blank? || !method_name_declared?
 
-      target = service.to_s.safe_constantize
-
-      return [unresolved_service_problem] if target.nil?
-      return [unanswered_method_problem] unless target.respond_to?(method_name)
-
-      []
+      [Execution::TargetContract.problem(service: service, method_name: method_name)].compact
     end
 
     private
@@ -139,16 +134,6 @@ module ChangeRequests
       return "stage #{stage.name.to_sym.inspect}" if quorum.name.nil?
 
       "stage #{stage.name.to_sym.inspect} quorum #{quorum.name.to_sym.inspect}"
-    end
-
-    def unresolved_service_problem
-      "op.service is #{service.inspect}, which does not resolve to a constant. Execution " \
-        "dispatches through the declaration, never through the strings on the row (§6.12 point 1)."
-    end
-
-    def unanswered_method_problem
-      "#{service} does not answer .#{method_name}. Dispatch calls the public singleton method, so " \
-        "an instance method of the same name is not the one it will reach (§6.12)."
     end
   end
 end
