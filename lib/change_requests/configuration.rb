@@ -6,6 +6,7 @@ module ChangeRequests
   class Configuration
     LABEL_STRATEGIES    = %i(live snapshot).freeze
     PERMISSION_MATCHES  = %i(any all).freeze
+    EXECUTION_MODES     = %i(inline background).freeze
 
     # Identity (§9.1)
     attr_reader :actor_types, :tenant_types
@@ -21,6 +22,10 @@ module ChangeRequests
 
     # Workflow and execution defaults (§7.1, §8)
     attr_accessor :only_record_rejections, :default_max_attempts, :default_expires_in
+
+    # Where T2 and T3 run (§8, §10). `job_class` is a string so the gem never holds a class
+    # reference across a reload, and so a headless host can name one it has not loaded.
+    attr_accessor :execution_mode, :job_class, :job_queue
 
     def initialize
       @actor_types  = {}
@@ -39,6 +44,10 @@ module ChangeRequests
       @only_record_rejections = false
       @default_max_attempts   = 1
       @default_expires_in     = nil
+
+      @execution_mode = :inline
+      @job_class      = "ChangeRequests::Execution::Job"
+      @job_queue      = :default
     end
 
     # §9.2 tells hosts to assign a bare lambda; the gem needs one object answering `allows?`.
@@ -78,6 +87,9 @@ module ChangeRequests
         actor_identity_problem,
         authorization_problem,
         max_attempts_problem,
+        execution_mode_problem,
+        job_class_problem,
+        job_queue_problem,
         *actor_types.values.flat_map(&:problems),
         *tenant_types.values.flat_map(&:problems),
       ].compact
@@ -121,6 +133,29 @@ module ChangeRequests
 
       "config.default_permission_match is #{default_permission_match.inspect}. " \
         "Expected #{PERMISSION_MATCHES.map(&:inspect).join(" or ")} (§5.3)."
+    end
+
+    def execution_mode_problem
+      return if EXECUTION_MODES.include?(execution_mode)
+
+      "config.execution_mode is #{execution_mode.inspect}. " \
+        "Expected #{EXECUTION_MODES.map(&:inspect).join(" or ")} (§8)."
+    end
+
+    # Not checked for resolvability here: a headless process may legitimately have `:background`
+    # configured and no ActiveJob at all, and refusing that would fail a boot that works. The
+    # enqueue reports it instead - see ChangeRequests.background_job! (§8).
+    def job_class_problem
+      return if job_class.respond_to?(:to_str) && !job_class.to_str.strip.empty?
+
+      "config.job_class is #{job_class.inspect}. Expected the name of an ActiveJob class, " \
+        "for example \"ChangeRequests::Execution::Job\" (§10)."
+    end
+
+    def job_queue_problem
+      return unless job_queue.nil? || job_queue.to_s.strip.empty?
+
+      "config.job_queue is #{job_queue.inspect}. Expected a queue name (§10)."
     end
 
     def actor_identity_problem

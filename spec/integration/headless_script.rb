@@ -53,6 +53,23 @@ report :validate, ChangeRequests.config.validate!
 report :error_message, ChangeRequests::NotApprovable.new(reason: :requester).message
 
 # A bare ActiveRecord connection - no database.yml, no Rails.application, no railtie.
+# §8, M3b-1: `:background` is configurable in a process that has never heard of ActiveJob. The
+# gem loads, validates and reports the absence rather than refusing to boot.
+report :active_job, defined?(ActiveJob) ? "loaded" : "absent"
+
+ChangeRequests.config.execution_mode = :background
+report :background_validate, ChangeRequests.config.validate!
+report :background_available, ChangeRequests.background_available?
+
+begin
+  ChangeRequests.background_job!
+  report :background_job, "resolved"
+rescue ChangeRequests::ConfigurationError => e
+  report :background_job, e.message.include?("ActiveJob") ? "reported" : "unclear"
+end
+
+ChangeRequests.config.execution_mode = :inline
+
 ActiveRecord::Base.establish_connection(**CONNECTION, database: "postgres")
 ActiveRecord::Base.connection.drop_database(DATABASE)
 ActiveRecord::Base.connection.create_database(DATABASE)

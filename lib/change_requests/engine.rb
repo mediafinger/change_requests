@@ -15,6 +15,13 @@ module ChangeRequests
       g.test_framework :rspec
     end
 
+    # So a host never calls `load_execution_job!` itself: ActiveJob is usually loaded before
+    # Bundler reaches this gem, but `rails/all` is not the only way to boot and `require` decides
+    # only once (§8).
+    initializer "change_requests.execution_job" do
+      ActiveSupport.on_load(:active_job) { ChangeRequests.load_execution_job! }
+    end
+
     # Fail the boot, not the first request that touches the gem.
     config.after_initialize do
       ChangeRequests.config.validate!

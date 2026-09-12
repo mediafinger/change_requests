@@ -44,6 +44,26 @@ RSpec.describe "the domain core, headless" do
     expect(probe).to include("json=2.")
   end
 
+  # M3b-1: §8's background mode is a setting, not a dependency. A headless process configures it,
+  # validates clean, and is told plainly that nothing can run it - rather than failing to boot.
+  describe "background execution without ActiveJob (§8)" do
+    it "has no ActiveJob at all" do
+      expect(probe).to include("active_job=absent")
+    end
+
+    it "validates with :background configured, since refusing would fail a boot that works" do
+      expect(probe).to include("background_validate=true")
+    end
+
+    it "reports the job as unavailable" do
+      expect(probe).to include("background_available=false")
+    end
+
+    it "says so, naming ActiveJob, when something tries to enqueue" do
+      expect(probe).to include("background_job=reported")
+    end
+  end
+
   describe "installing from nothing" do
     # Its own database: nothing here runs in a transaction, so committed rows would leak into every
     # spec that counts them.
