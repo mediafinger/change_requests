@@ -49,6 +49,14 @@ module ChangeRequests
       { type: type, id: actor.id.to_s, label: registered.label.call(actor).to_s }
     end
 
+    # The host-facing entry point (§6.5), wrapping Commands::Create. The key is positional and the
+    # rest are keywords because this is the call every host writes, and it reads better that way.
+    # It adds nothing else: the errors are Create's, unrescued.
+    def request!(operation_key, requester:, payload: {}, tenant: nil)
+      Commands::Create.call(operation_key: operation_key, requester: requester,
+                            payload: payload, tenant: tenant)
+    end
+
     def configure
       yield(config)
 

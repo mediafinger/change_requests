@@ -11,7 +11,7 @@ module ChangeRequests
     #     tenant:        current_organization      # optional
     #   )
     #
-    # M2 wraps this as `ChangeRequests.request!`.
+    # `ChangeRequests.request!` is the host-facing wrapper (§6.5); this is the command itself.
     #
     # The call is identical however elaborate the workflow is: thresholds, permissions and quorum
     # structure come from the declaration, never from the caller (§6.12 point 3).

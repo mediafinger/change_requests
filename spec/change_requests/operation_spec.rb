@@ -100,6 +100,22 @@ RSpec.describe ChangeRequests::Operation do
       expect(operation.problems.join).to include("no approvals")
     end
 
+    # `attr_writer :method_name` lets a host assign the documented :call default away. Dispatch
+    # then has nothing to call, and the NOT NULL column would surface it as a RecordInvalid.
+    it "reports a method_name assigned away" do
+      complete!
+      operation.method_name = nil
+
+      expect(operation.problems.join).to include("method_name")
+    end
+
+    it "reports a blank method_name, which is not a method either" do
+      complete!
+      operation.method_name = "  "
+
+      expect(operation.problems.join).to include("method_name")
+    end
+
     it "reports every problem at once, not the first" do
       expect(operation.problems.size).to eq(3)
     end
