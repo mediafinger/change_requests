@@ -82,12 +82,20 @@ RSpec.describe ChangeRequests::Guards::Execute do
   end
 
   describe ":not_approved" do
-    %w(pending executing).each do |status|
-      it "refuses a request that is #{status}" do
-        change_request.update!(status: status)
+    it "refuses a request that is pending" do
+      change_request.update!(status: "pending")
 
-        expect(guard.reason).to eq(:not_approved)
-      end
+      expect(guard.reason).to eq(:not_approved)
+    end
+  end
+
+  # Split from :not_approved by M3a-2: a claimed request *is* approved, and telling an operator it
+  # is not approved while its target runs is simply untrue. Guards::Cancel already uses the reason.
+  describe ":executing" do
+    it "refuses a request whose target is already running" do
+      change_request.update!(status: "executing")
+
+      expect(guard.reason).to eq(:executing)
     end
   end
 
