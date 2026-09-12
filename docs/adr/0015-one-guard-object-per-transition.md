@@ -24,14 +24,26 @@ and the presenter build the same object.
   `Guards::Base::REASONS`, the closed shared vocabulary. Branch order inside `refusal` is part of
   the contract: it decides which of several true refusals the person is shown.
 - `refuses_with` declares the error class, rather than deriving it from the guard's name —
-  `Comment` and `Expire` refuse with `NotAuthorized`, the decision guards with their own
+  `Comment`, `Expire` and `Reap` refuse with `NotAuthorized`, the decision guards with their own
   `TransitionError` ([ADR-0012](0012-declared-error-taxonomy.md)).
-- One reason overrides that declaration: `:already_finalized` always raises `AlreadyFinalized`,
-  whichever guard produced it, so a host rescuing "this request is over" catches every command. It
-  is the same class and the same reason the model's terminal-state guard raises underneath.
+- Two reasons override that declaration, through `Guards::Base::REASON_ERRORS`.
+  `:already_finalized` always raises `AlreadyFinalized`, whichever guard produced it, so a host
+  rescuing "this request is over" catches every command — the same class and reason the model's
+  terminal-state guard raises underneath. `:override_not_permitted` always raises
+  `OverrideNotPermitted`, so a host alerting on attempted break-glass rescues it by name rather
+  than filtering `NotExecutable` by reason.
 - The undeclared-operation refusal lives in `Guards::Base` and runs before `refusal`, so no guard
-  repeats it. `Comment` opts out with `exempt_from_undeclared_operation!` — a request stranded by a
-  removed declaration is exactly the one someone needs to leave a note on.
+  repeats it. Three guards opt out with `exempt_from_undeclared_operation!`: `Comment`, because a
+  request stranded by a removed declaration is exactly the one someone needs to leave a note on;
+  `Cancel`, because it is the one worth clearing away — and to anyone, the requester-or-approver
+  rule being dropped along with the refusal; and `Reap`, because a claim that died is dead whatever
+  the registry says. The third exists because `Cancel` refuses an `executing` request, so without
+  it a request claimed as its declaration vanished could be cleared by nothing at all.
+
+**One guard object, built once.** Where a command needs both the decision and what it was decided
+about, it reads them off the same instance rather than recomputing: `Guards::Approve#countable_quorums`
+is the quorums an approval links to, and `Guards::Reap#stuck_attempt` is the row the reaper writes
+off. Recomputing either in the command is how the reason and the write drift apart.
 
 **There is no `Guards::Create`.** A guard asks "may this actor do X *to this row*", and at creation
 there is no row. `Commands::Create` runs the three equivalent checks inline. The presenter's half of
@@ -58,3 +70,10 @@ implementation, not by a guard carrying a second signature.
   had already drifted once before that spec existed.
 - A guard resolves the acting actor through the registry, so an unregistered class raises
   `UnknownActorType` rather than producing a refusal. The allowlist is deliberately not a reason.
+- Two guards are system-only — `Expire` and `Reap` — so supplying an actor at all is itself the
+  refusal (`:not_system`). Every cross-guard spec has to special-case them, because the actor axis
+  the other six share does not apply.
+- `Guards::Execute` answers two questions in one class: the ordinary branch and §8.1's override
+  branch, chosen by an `override:` option. They are separate methods rather than one relaxed
+  ordering, but they are still one class, and a reader has to notice which branch a reason came
+  from.

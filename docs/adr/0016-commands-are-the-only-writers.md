@@ -38,12 +38,28 @@ locked rather than the object it was handed.
 - `ActiveRecord::StaleObjectError` maps to `StaleRequest`. `lock_version` is the belt to
   `with_lock`'s braces.
 
-Two commands depart from the shape, each for a stated reason. `Commands::Create` has no row to lock
-until it has written one, so it wraps a transaction instead — the request and its whole stage,
-quorum, permission and eligible-actor graph are all-or-nothing.
-`Commands::EvaluateWorkflow` ([ADR-0017](0017-approvals-count-through-links.md)) takes no lock of its
-own: it is internal, invoked only from inside a caller that already holds one, and re-locking would
-reload the row that caller has just written to.
+**A distinct intent gets a distinct command class, never a flag.** Every command hard-codes the event
+kind it emits, so a caller-supplied kind would be the first exception to that. `Commands::Override`
+is `Execute` with `override: true`; `Commands::CancelUndeclared` is `Cancel` emitting
+`operation_undeclared` instead of `canceled`. Both are **subclasses**, not delegations, so the rows
+and events they write cannot drift from the command they wrap — there is nothing there to drift.
+`Cancel` carries exactly two seams for it, the event kind and the metadata, and nothing else.
+
+Three commands depart from the locking shape, each for a stated reason:
+
+- `Commands::Create` has no row to lock until it has written one, so it wraps a transaction instead
+  — the request and its whole stage, quorum, permission and eligible-actor graph are all-or-nothing.
+- `Commands::EvaluateWorkflow` ([ADR-0017](0017-approvals-count-through-links.md)) takes no lock of
+  its own: it is internal, invoked only from inside a caller that already holds one, and re-locking
+  would reload the row that caller has just written to.
+- `Commands::Execute` takes none either, for the opposite reason to Create's: §8 forbids holding a
+  lock across the target invocation, and the three transactions it drives each take their own
+  ([ADR-0022](0022-execution-in-three-transactions.md)).
+
+`Commands::SettleExecution` is the one command that does not stamp the acting actor on its event. It
+takes no actor at all: the executer's triple was recorded on the attempt when the claim was made, and
+it reads that back — which is what lets a background job settle a claim it never made, and makes the
+`executed` event name whoever actually claimed the run.
 
 ## Consequences
 
@@ -63,4 +79,9 @@ reload the row that caller has just written to.
   — it catches a path no spec exercises — but it is a regular expression over the tree, and a
   sufficiently creative write would slip past it.
 - Commands return the request, except `Comment`, which returns the event it wrote, because the
-  request is unchanged by it.
+  request is unchanged by it, and `Commands::ClaimExecution`, which returns the attempt its
+  successor has to finish.
+- "Commands are the only writers" is now enforced across more classes than a reader expects:
+  `ClaimExecution`, `SettleExecution` and `Reap` are commands nobody calls directly, existing only
+  so that a sweep or a runner has something to write through. The alternative was a second event
+  path, which is the rule this record exists to keep.

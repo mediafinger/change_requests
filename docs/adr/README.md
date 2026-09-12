@@ -33,3 +33,10 @@ than an edit.
 | [0019](0019-separation-of-duties.md) | Refuse the requester by identity, and make only execution configurable | Accepted |
 | [0020](0020-refusal-vocabulary-and-fallback.md) | Ship refusal reasons as a closed vocabulary that degrades to the symbol | Accepted |
 | [0021](0021-serialise-commands-let-the-index-arbitrate.md) | Serialise commands with a row lock and let the unique index arbitrate | Accepted |
+| [0022](0022-execution-in-three-transactions.md) | Split execution into three transactions, and commit the claim before the side effect | Accepted |
+| [0023](0023-one-declaration-surface.md) | Declare a workflow one way | Accepted |
+| [0024](0024-idempotence-is-required-not-declared.md) | Require idempotence of every target rather than declaring it per operation | Accepted |
+| [0025](0025-verification-from-one-set-of-checks.md) | Verify declarations at boot, from the same checks the runtime reads | Accepted |
+| [0026](0026-distinct-intent-distinct-command.md) | Give a distinct intent a distinct command class, not a flag | Accepted |
+| [0027](0027-activejob-is-optional.md) | Make background execution a setting and ActiveJob an optional dependency | Accepted |
+| [0028](0028-sweeps-are-rake-tasks.md) | Sweep with rake tasks, and keep the destructive one off the schedule | Accepted |
