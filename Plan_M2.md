@@ -545,8 +545,13 @@ places without ever saying how often. **Hourly at five past** (**Q8**):
 ```cron
 5 * * * *  cd /app && bin/rails change_requests:expire_stale
 6 * * * *  cd /app && bin/rails change_requests:reap_stuck_executions
-7 * * * *  cd /app && bin/rails change_requests:cancel_undeclared
 ```
+
+**`cancel_undeclared` is not on it.** This ticket originally scheduled it at 7 past, which contradicts
+§5.11: the bulk cancellation ships as a rake task *rather than* an automatic sweeper, because a missing
+declaration is as likely to be a deploy accident as a deliberate removal and `canceled` is final. A
+scheduled sweep would turn a failed initializer into a table of permanently cancelled requests within the
+hour. It is documented as an operator's decision, with the revert path beside it.
 
 Five past rather than on the hour, so they do not land with every other hourly job in the estate. The
 interval is a recommendation, not a requirement: `expires_at` and `older_than` are the deadlines, and a
