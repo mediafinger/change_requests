@@ -23,9 +23,9 @@ A Rails gem that puts approval gates in front of guarded operations. Instead of 
 13. [Generators and templates](#13-generators-and-templates)
 14. [Test kit for host apps](#14-test-kit-for-host-apps)
 15. [The gem's own test suite](#15-the-gems-own-test-suite)
-16. [Feature list for 1.0](#16-feature-list-for-10)
+16. [Feature list for the first public release](#16-feature-list-for-the-first-public-release)
 17. [Milestones](#17-milestones)
-18. [Cut line for 1.0](#18-cut-line-for-10)
+18. [Cut line for the first public release](#18-cut-line-for-the-first-public-release)
 19. [Open decisions](#19-open-decisions)
 20. [Appendix: salvage from the existing implementations](#20-appendix-salvage-from-the-existing-implementations)
 
@@ -702,7 +702,7 @@ of raising. Two mitigations ship:
 `rake change_requests:verify_actors` reports dangling references per type as a report, never as an
 enforcement; and `payload_labels` (below) does the same job for the records a payload points at.
 
-**PostgreSQL only, but nothing that blocks a port.** The gem is PostgreSQL-only at 1.0 and says so
+**PostgreSQL only, but nothing that blocks a port.** The gem is PostgreSQL-only and says so
 loudly. No compatibility layer, no adapter branches, no MySQL or SQLite code paths, no second CI adapter -
 those may never be wanted, and speculative portability shims are pure cost.
 
@@ -2355,7 +2355,7 @@ Plus a static check that no file under the domain directories mentions `ActionCo
   repository's bundle, which is the whole point of it - it catches everything the dummy app's `path:`
   dependency hides.
 
-## 16. Feature list for 1.0
+## 16. Feature list for the first public release
 
 **Core**
 
@@ -2421,6 +2421,7 @@ Estimates assume one experienced developer working from this plan.
 | **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL — which **replaced** M1b's `op.approvals` shorthand — plus `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry and materialise-on-create landed early, in M1b; `op.idempotent` was removed rather than wired in. **Shipped.** `op.cooldown` moved to M9b, which is where the window it measures is built | §6.4, §6.12 | 4.5 d  |
 | **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, `Commands::Override` and the §8.1 branch. **Concurrency specs.** `Guards::Execute` landed in M1b. **Shipped**                                                                                                                                                               | §8, §15.3   | 4.5 d  |
 | **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!` and `Commands::CancelUndeclared`, the maintenance rake tasks and `docs/05`. **Shipped**                                                                                                                                                                                                       | §8, §5.11   | 2.25 d |
+| **M9a** | 0.4.1     | Multi-quorum evaluation: one-quorum-per-approval linking, per-quorum `quorum_satisfied` timing, named approvers. **Pulled ahead of M4** — two of its three deliverables are live defects, and every milestone after it displays the number they get wrong. Tickets in `Plan_M4.md`                                        | §7.1        | 2–3 d  |
 | **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`                                                                                                                                                                                                         | §9          | 2–3 d  |
 | **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                                                                                                                                                                                                                                       | §11         | 3 d    |
 | **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination, `Operation#requestable_by?` (§7.2 †)                                                                                                                                                                                                           | §12 Tier 1  | 3 d    |
@@ -2428,11 +2429,10 @@ Estimates assume one experienced developer working from this plan.
 | **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                                                                                                                                                                                                                        | §12 Tier 2  | 2–3 d  |
 | **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                                                                                                                                                                                    | §13         | 4 d    |
 | **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                                                                                                                                                                                                                        | §14         | 3–4 d  |
-| **M9a** |           | Multi-quorum evaluation: one-quorum-per-approval linking, per-quorum `quorum_satisfied` timing, named approvers. `any_quorum`, `all_quorums` satisfaction, sequential stage advance and stage closing landed in M1b. **Carries two correctness gaps, not only features, and they are live from 0.3.0** (§17.1)                                                                       | §7.1        | 2–3 d  |
 | **M9b** |           | `op.cooldown` over both decisions: `CloseStageJob`, unapproval inside the window, a rejected stage returning to `pending` when its last rejection is withdrawn, `close_due_stages!` fallback                                                                                                                                                                                         | §7.1        | 2–3 d  |
 | **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                                                                                                                                                                                                                                     | §5.3, §11   | 2 d    |
 | **M10** | 0.11.0    | Notifications: `on_event` after_commit, `ActiveSupport::Notifications`, and `docs/08`'s worked example. The maintenance rake tasks shipped early, in M3b                                                                                                                                                                                                                             | §10         | 2–3 d  |
-| **M11** | **1.0.0** | Docs set, README with screenshots, CHANGELOG, semver policy, RBS in `sig/`, release                                                                                                                                                                                                                                                                                                  | -           | 4–5 d  |
+| **M11** | 0.12.0    | Docs set, README with screenshots, CHANGELOG, versioning policy, RBS in `sig/`, **the first public release**. 1.0.0 is a separate, later decision, taken once adopters have used the gem                                       | -           | 4–5 d  |
 
 **Total: roughly 10-12 focused weeks**, or 5-6 months at one day a week.
 M0 through M1b alone is ~23 days: M1 carries the schema, which is the work that is cheapest to do once and
@@ -2449,16 +2449,17 @@ rule that makes the same sentence true for one person holding both roles stayed 
 closing is still open from the other side (§5.3), and the per-quorum event timing went with it (§7.1).
 Neither was reachable while `op.approvals` was the only declaration syntax - **and M2 ended that**.
 
-**That trade is now taken, not pending** (§17.1). `all_quorums` has been declarable since 0.3.0, so a stage
-declared "one Admin AND two Owners" closes on two people where its own prose says three, and it stays that
-way until M9a. Nothing is released to a host that could meet it, and reordering seven milestones cost more
-than carrying it - but it is carried in the open: `spec/change_requests/workflow/shapes_spec.rb` holds it as
-a **pending example naming M9a**, which reddens the moment M9a makes it pass. That tripwire is the reason
-M9a cannot quietly slip.
+**That trade was taken, and it is now closed.** `all_quorums` has been declarable since 0.3.0, so a stage
+declared "one Admin AND two Owners" closes on two people where its own prose says three. It was carried in
+the open - `spec/change_requests/workflow/shapes_spec.rb` holds it as a **pending example naming M9a**,
+which reddens the moment M9a makes it pass - and that tripwire is why it could not quietly slip.
 
-**M9a is now the oldest known defect in the gem**, and the case for pulling it ahead of M4 and M5 is
-stronger than it was when the trade was made: every milestone after it adds surface that renders or reports
-quorum state.
+**M9a is pulled ahead of M4.** It is the oldest known defect in the gem, and every milestone after it adds
+surface that renders or reports quorum state: M5-3 renders it, M6b-2 draws it, M9c-1 queries around it.
+Fixing the count once, before anything reads it, is cheaper than fixing it and then revising three
+milestones of presenter and view work. Its tickets are in `Plan_M4.md`; the name stays `M9a` because
+`Guards::Approve#countable_quorums`, two pending spec messages and three sections of this document all
+reference it.
 
 ### 17.1 Gaps to close before ticketing those parts
 
@@ -2470,7 +2471,7 @@ through and left in place, because the reasoning behind a closed question is wor
 |------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | ~~**M2 / M9a**~~ | **Closed: M2 ships first and M9a keeps the linking rule.** Nothing is released, so `all_quorums` is declarable and knowingly incomplete between 0.3.0 and M9a rather than reordering seven milestones or teaching `verify!` to refuse a shape the docs describe. `Plan_M2.md` M2-6 carries a pending spec naming M9a, so the gap is visible in the suite and reddens the moment it is closed.                                                                                                |
 | ~~**M2**~~       | **Closed: the same as `Configuration#validate!`** - one raised error listing every problem, so a host that has seen one of these has seen both.                                                                                                                                                                                                                                                                                                                                              |
-| **M2 / M9a**     | §6.12 point 6 requires `verify!` to refuse an **unsatisfiable `all_quorums` stage**, and never defines unsatisfiable. Eligibility stops being statically decidable as soon as permission rows are involved, since permissions are a host runtime question - the only decidable case is a quorum that names actors, declares no permission rows, and names fewer of them than its threshold. Worth deciding alongside M9a, which is the milestone that makes `all_quorums` mean what it says. |
+| **M9a**          | §6.12 point 6 requires `verify!` to refuse an **unsatisfiable `all_quorums` stage**, and never defines unsatisfiable. Eligibility stops being statically decidable as soon as permission rows are involved, since permissions are a host runtime question - the only decidable case is a quorum that names actors, declares no permission rows, and names fewer of them than its threshold. Worth deciding alongside M9a, which is now the **next** milestone and the one that makes `all_quorums` mean what it says (`Plan_M4.md`). |
 | ~~**M2 / M9b**~~ | **Closed: `op.cooldown` belongs to M9b**, with `CloseStageJob` and the window it measures. `Plan_M2.md` §1 had it in M2 while §2's table assigned it to M9b and §3's build order gave it no ticket; §17 and §19.9 now say M9b throughout. `verify!`'s "no cooldown without ActiveJob" check ships with the attribute, not before it.                                                                                                                                                         |
 | **M5**           | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                                                                                                                                                                                                                                                                                                                                                     |
 | **M6b**          | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.                                                                                                                                                                                                                                                                                                                                                 |
@@ -2478,7 +2479,10 @@ through and left in place, because the reasoning behind a closed question is wor
 | **M10**          | The object handed to `config.on_event` is unspecified - the `Event` record, a value object, or a payload hash, and which associations are preloaded on it.                                                                                                                                                                                                                                                                                                                                   |
 | **M4**           | `key_type` casting rules: what `:string` means for a non-integer, non-uuid PK, and what `finder` is expected to return for ids that no longer resolve.                                                                                                                                                                                                                                                                                                                                       |
 
-## 18. Cut line for 1.0
+## 18. Cut line for the first public release
+
+**0.12.0, not 1.0.0.** Everything below ships, and then the gem waits for real-world experience before it
+promises stability on a surface no adopter has pushed on. The list is the cut line either way.
 
 **In:** operations, staged schema, events, `rejected`, execution safety, presenters, ERB UI with the six-tier
 override story, generators, host test kit, PostgreSQL-only, Rails 8.1.

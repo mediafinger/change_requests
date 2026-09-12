@@ -1,8 +1,9 @@
-# Plan M4 / M5 — actors, identity and presentation
+# Plan M9a / M4 / M5 — evaluation, actors, and presentation
 
-Tickets for **M4** (actor references, visibility, tenancy) and **M5** (presenters, value objects and the
-`as_json` contract), written against `PLAN.md` §9 and §11 — and against what M0 through M3b actually
-shipped rather than what they were planned to.
+Tickets for **M9a** (the linking rule and per-quorum event timing, **pulled ahead of M4**), **M4** (actor
+references, visibility, tenancy) and **M5** (presenters, value objects and the `as_json` contract), written
+against `PLAN.md` §7.1, §9 and §11 — and against what M0 through M3b actually shipped rather than what they
+were planned to.
 
 `PLAN.md` stays the source of truth. Where this document disagrees with it, that is a question in §6, not a
 decision already taken.
@@ -13,16 +14,23 @@ decision already taken.
 
 | Milestone | Version | What it is                                                                                     | Spec        |
 |-----------|---------|------------------------------------------------------------------------------------------------|-------------|
+| **M9a**   | 0.4.1   | One-quorum-per-approval linking under `all_quorums`, per-quorum `quorum_satisfied` timing, named approvers | §7.1, §5.3  |
 | **M4**    | 0.5.0   | `ActorRef`, batch resolution, label strategy, deep links, `visible_scope`, tenancy, `ChangeRequests::Actor` | §9, §5.7    |
 | **M5**    | 0.6.0   | Presenters, the `Value::*` objects, collection eager loading, the documented `as_json` contract | §11, §5.12  |
 
 **Not here.** The controllers and views that render any of this (M6), the generators (M7), the host test
-kit (M8), `awaiting_approval_from` (M9c), notifications (M10).
+kit (M8), cooldown (M9b), `awaiting_approval_from` (M9c), notifications (M10).
 
-**M9a is still open, and it is older than either of these.** `all_quorums` has been declarable since 0.3.0
-while its linking rule is not built, so a stage declared "one Admin AND two Owners" closes on two people.
-M5-3 renders stage progress, and M5-4 renders the actions beside it — both will faithfully display a
-quorum state that is wrong. See §6, **Q1**.
+**M9a is pulled ahead of M4 and M5, and it goes first** (**Q1**). It is the oldest known defect in the gem:
+`all_quorums` has been declarable since 0.3.0 while its linking rule is not built, so a stage declared
+"one Admin AND two Owners" closes on two people. M5-3 renders stage progress and M5-4 renders the actions
+beside it — both would otherwise faithfully display a quorum state that is wrong, and M6 would draw it.
+Fixing the count before anything displays it is cheaper than fixing it after three milestones have been
+written against it.
+
+**The name stays `M9a`.** It is referenced by `Guards::Approve#countable_quorums`' own comment, by two
+pending spec messages, and by §5.3, §7.1 and §17.1. Renumbering it would invalidate all of that to gain
+nothing but a tidier sequence.
 
 ---
 
@@ -54,6 +62,17 @@ quorum state that is wrong. See §6, **Q1**.
 | `config.payload_preview_limit`, `payload_renderer` | §10, §5.12 only; **not on `Configuration`** | M5-2 |
 | `lib/change_requests/presenters/`   | a `.keep` file                               | M5                                 |
 
+**What M9a inherits, specifically:**
+
+- `Commands::EvaluateWorkflow` implements steps 0–4 of §7.1 **except** the cooldown branches, and its
+  `satisfied?` already distinguishes `any_quorum` from `all_quorums` — the counting rule shipped in M1b.
+  What is missing is the **linking** rule that decides which quorums an approval counts toward.
+- `Guards::Approve#countable_quorums` returns `eligible_quorums` unchanged, and its own comment has been
+  predicting the change since M1b: "M9a makes it a strict subset under all_quorums".
+- `change_request_quorum_eligible_actors` rows are written by `Commands::Create` and read by
+  `Authorization::Permissions#named_approver?`. **Named approvers already count**; what M9a adds is the
+  linking rule around them.
+
 **Three facts that change what these tickets have to do:**
 
 1. **`#requester` returns a `Hash`**, not an `ActorRef`. `{ type:, id:, label: }`, plus `identity` where the
@@ -69,6 +88,10 @@ quorum state that is wrong. See §6, **Q1**.
 ## 3. Build order
 
 ```
+M9a-1  linking rule ─→ M9a-2  event timing ─→ M9a-3  named approvers
+   │
+   └─────────────────────────────────────────→ M5-3  stages   (reads correct links from the start)
+
 M4-1  ActorRef ──┬─→ M4-2  finder + batch resolution ──→ M5-6  CollectionPresenter
                  └─→ M5-2  RequestPresenter: identity, status, payload
 
@@ -80,12 +103,94 @@ M5-1  Value objects ─┬─→ M5-2 ─→ M5-7  as_json + docs/06
                      └─→ M5-5  timeline
 ```
 
-M4-1 is the only ticket everything else waits on. M4-3, M4-4 and M4-5 are independent of all of M5 and can
-be done in either order.
+**M9a goes first, and all of it before any of M4.** Nothing in M4 depends on it, but M5-3 and M5-4 do —
+and the whole point of pulling it ahead is that no presenter is written against the wrong count.
+
+M4-1 is the only other ticket everything waits on. M4-3, M4-4 and M4-5 are independent of all of M5 and
+can be done in either order.
 
 ---
 
-## 4. Tickets — M4: actors, identity and visibility
+## 4. Tickets — M9a: the linking rule and event timing
+
+### M9a-1 — One quorum per approval under `all_quorums`
+**Spec:** §7.1, §5.3, §17.1
+**Depends on:** nothing
+
+**Deliver** the rule §7.1 has always described and `countable_quorums` has never implemented:
+
+- Under `any_quorum`, an approval links to **every** quorum the actor qualifies for — unchanged.
+- Under `all_quorums`, it links to **exactly one**: the **lowest-`position`** quorum it qualifies for and
+  which is not already satisfied.
+- `Guards::Approve#countable_quorums` becomes a strict subset of `eligible_quorums`, which its own comment
+  has been predicting since M1b.
+
+**The position rule is the whole of the tie-break**, and it is declaration order (§5.3), so a host reads
+their own declaration top to bottom and knows which quorum an approval will land in. "Not already
+satisfied" matters: without it, the third approver of a three-quorum stage would land on a quorum that is
+already closed and the stage would never complete.
+
+**What turns green:** `spec/change_requests/workflow/shapes_spec.rb`'s pending example for §6.9 shape (b) —
+"two people must not close a stage that demands three". It must be **un-pended in this ticket**, not left
+passing-but-pending, which RSpec reports as a failure anyway.
+
+**Acceptance:** §6.9 shape (b) needs three distinct people and cannot be closed by two, whatever
+permissions they hold; an `any_quorum` stage is unchanged, asserted by the existing suite passing
+untouched; an actor qualifying for three quorums of an `all_quorums` stage links to one; the pending
+example is un-pended and passes.
+**Est:** 1 d
+
+---
+
+### M9a-2 — `quorum_satisfied` where the transition happens
+**Spec:** §7.1
+**Depends on:** M9a-1
+
+**Deliver** the event timing §7.1's divergence note describes:
+
+- `quorum_satisfied` is emitted in **step 1**, when the quorum's status changes to satisfied — not from
+  `close_stage!`.
+- A quorum that **stops** being satisfied (an unapproval dropping it below threshold) emits its transition
+  too, rather than being silently un-satisfied. §7.1 asks for the withdrawal to be "visible rather than
+  invisible by omission".
+- `stage_satisfied` still comes from `close_stage!` and still names the quorum that closed it.
+- For a single-quorum stage the two arrive as a pair, one after the other — "the cost of having the
+  multi-quorum case read correctly from the same code".
+
+**This changes the trail's meaning, deliberately.** Today the trail never claims a satisfaction that was
+later withdrawn, which is the compensating argument §7.1 records and rejects. After this it claims both the
+satisfaction and the withdrawal, which is more information and a longer timeline (**Q6**).
+
+**Acceptance:** an `all_quorums` stage emits one `quorum_satisfied` per quorum, each at the moment that
+quorum was met and stamped with that time; a stage that never closes still emits the events for the quorums
+that were met; an unapproval below threshold emits the withdrawal; `stage_satisfied` still names the
+closing quorum.
+**Est:** 0.75 d
+
+---
+
+### M9a-3 — Named approvers, end to end
+**Spec:** §5.3, §6.9(d)
+**Depends on:** M9a-1
+
+**Deliver** the named-approver path as a first-class case rather than an incidental one:
+
+- The rows and the predicate already exist. What is missing is that named approvers interact with the
+  linking rule — an actor named on two quorums of an `all_quorums` stage must land on one, exactly as a
+  permission-holder does.
+- A quorum mixing named actors **and** permission rows is OR-ed (§5.3), and the linking rule sees the
+  union.
+- M5-3's `remaining_options` must then render a named quorum honestly — "1 more from Cleo or Gene", not
+  "1 more from named" — which it can, because this ticket lands first.
+
+**Acceptance:** §6.9 shape (d)'s `:named` quorum behaves identically to a permission quorum under the
+linking rule; an actor named on two quorums of an `all_quorums` stage links to one; a mixed quorum counts
+an actor who qualifies either way, once.
+**Est:** 0.5 d
+
+---
+
+## 5. Tickets — M4: actors, identity and visibility
 
 ### M4-1 — `ChangeRequests::ActorRef`
 **Spec:** §9.1, §5.7, §11
@@ -245,7 +350,7 @@ gem the gemspec does not depend on as a requirement.
 
 ---
 
-## 5. Tickets — M5: presenters
+## 6. Tickets — M5: presenters
 
 ### M5-1 — The `Value::*` objects
 **Spec:** §11
@@ -327,15 +432,14 @@ by counting; preview ordering is alphabetical and honours the limit.
 - Approver labels come from the approval rows' snapshots, so a stage renders completely with
   `resolve_actors: false`.
 
-**Carries M9a's gap** (**Q1**). `approved` counts `approval_quorums` links, and until M9a one approval may
-link to several quorums of an `all_quorums` stage — so a stage needing three people can render as satisfied
-with two, and `remaining_options` will say nothing is outstanding. **A pending spec naming M9a asserts the
-honest count**, in the same shape M2-6's tripwire uses, so the presenter reddens when M9a lands rather than
-quietly starting to tell the truth.
+**M9a-1 has already landed**, so `approved` — which counts `approval_quorums` links — is correct from the
+first line of this ticket. That is the whole reason M9a was pulled ahead: written against the old linking
+rule, this presenter would have rendered a stage needing three people as satisfied with two, and
+`remaining_options` would have said nothing was outstanding.
 
-**Acceptance:** each of §6.9's four shapes renders its progress correctly at every step; a half-satisfied
-`any_quorum` stage lists both options; an `all_quorums` stage lists what is outstanding; the M9a spec is
-pending and names it.
+**Acceptance:** each of §6.9's four shapes renders its progress correctly at every step, **including shape
+(b) needing three distinct people**; a half-satisfied `any_quorum` stage lists both options; an
+`all_quorums` stage lists what is outstanding; a named quorum lists its actors by label (M9a-3).
 **Est:** 0.75 d
 
 ---
@@ -433,13 +537,14 @@ document cannot drift from the code; every value type matches the table; `routes
 
 ---
 
-## 6. Questions
+## 7. Questions
 
-**Five raised, five answered.** Two of them are §17.1 rows, now closed.
+**Six raised, six answered.** Three of them are §17.1 rows, now closed.
 
 | ID     | Question                                                     | Answer                                                                                                                                                                                                                                                          |
 |--------|--------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q1** | M5 renders quorum state that M9a has not made correct.        | **Ship M5, carry the gap as a second tripwire.** M5-3 gets a pending spec naming M9a beside M2-6's. But the case for pulling M9a ahead of M4/M5 is now stronger than when the trade was made, because every milestone after it adds surface that displays the wrong number. Worth deciding before M5-3 starts, not during it. |
+| **Q1** | M5 would render quorum state M9a has not made correct.        | **M9a is pulled ahead and goes first.** Every milestone after it adds surface that displays the number — M5-3 renders it, M5-4 sits beside it, M6b-2 draws it, M9c-1 queries around it — so fixing the count once, before anything reads it, is cheaper than fixing it and then revising four tickets' worth of work. The two tripwires that were holding the gap (`shapes_spec`'s pending example, and the one M5-3 would have carried) are resolved by M9a-1 rather than accumulated. §17's milestone table is reordered to match. |
+| **Q6** | Moving `quorum_satisfied` to step 1 makes the trail claim satisfactions that were later withdrawn. | **Emit both, as §7.1 asks.** The current behaviour's only virtue is that it never records a satisfaction that was undone — but it achieves that by recording nothing, and a quorum on a stage that never closes gets no event at all. A trail that says "met, then withdrawn" is more honest than one that says nothing, and M9a-2 emits the withdrawal too so the pair reads correctly. |
 | **Q2** | `key_type` casting rules, and what `finder` returns for ids that no longer resolve (§17.1). | **`key_type` governs the cast; anything that will not cast is dropped.** `:integer` parses and drops what will not parse, `:uuid` validates the format and drops what does not match, `:string` passes through verbatim — the escape hatch for ULIDs and every other key shape. `finder` returns what it finds: missing ids are absent, never nil placeholders and never an exception, and their refs report `resolved? == false`. This is §11's "deleted actors degrade, never raise" extended to malformed ids, which is the same failure from the reader's side. |
 | **Q3** | What `ChangeRequests::Actor` actually provides (§2 names it; §9 never describes it). | **Read-side conveniences only, registering nothing.** Registration is `config.actor_type`; a concern that also registered would put the same fact in two places, which is how they drift. M4-4 lists the three methods; the inbox reader waits for M9c to own the scope. |
 | **Q4** | §11 orders `payload_preview` by "schema order"; §5.12 orders it alphabetically. | **Alphabetically, and §11 is corrected.** §5.12 carries the reason — `jsonb` does not preserve insertion order, so alphabetical is the only ordering that is both deterministic and explicable — and §11 states the conclusion without it. There is no schema to order by. |
@@ -525,19 +630,27 @@ visible in review rather than in an adopter's bug report.
 | **§11**  | `payload_preview` is ordered alphabetically, not in "schema order"                                | Q4   |
 | **§9**   | `ChangeRequests::Actor` gets the description it never had                                         | Q3   |
 | **§9.1** | `key_type`'s casting rules, and that an id which will not cast is dropped rather than raising     | Q2   |
-| **§17.1**| The M4 row and the M5 row both close                                                              | Q2, Q5 |
+| **§17.1**| The M4 row, the M5 row and the M2/M9a row all close                                               | Q1, Q2, Q5 |
+| **§17**  | M9a's row moves ahead of M4; the "accepted trade" paragraph becomes a record of a trade that was taken and then closed | Q1   |
+| **§7.1** | The divergence note is removed once M9a-2 lands                                                   | Q6   |
 
 ---
 
-## 7. Estimate
+## 8. Estimate
 
 | Milestone | Tickets | Days     |
 |-----------|---------|----------|
+| M9a       | 3       | 2.25     |
 | M4        | 5       | 3.0      |
 | M5        | 7       | 4.5      |
-| **Total** | **12**  | **7.5**  |
+| **Total** | **15**  | **9.75** |
 
-Against §17's 2–3 d + 3 d = 5–6 d.
+Against §17's 2–3 d (M9a) + 2–3 d (M4) + 3 d (M5) = 7–9 d.
+
+**M9a-1 is a day for one method's worth of change**, because the change is to the rule every existing
+approval spec was written against. The risk is not writing it; it is proving that `any_quorum` is
+genuinely untouched, and that means the existing suite passing unmodified is part of the acceptance rather
+than a happy accident.
 
 The gap is almost entirely M4-1 and M5-7. **M4-1** is a day because changing the return type of five
 generated readers touches roughly forty spec assertions — the same shape of work M2-2 was, and it costs the
@@ -545,6 +658,6 @@ same. **M5-7** is not "serialise the presenter": it is writing a contract down, 
 against the code programmatically, and pinning it with a golden file, because §11 calls it public API and
 §17.1 records that nobody had ever said what it contains.
 
-M5-3 and M5-4 are the tickets to watch. Both render state that M9a has not yet made correct, and both are
-cheaper to write once than to write and then revise — which is the argument for **deciding Q1 before M5
-starts**, not after.
+M5-3 and M5-4 are no longer the tickets to watch: M9a-1 lands before either, so both render a count that
+is already correct. That was the argument for pulling it ahead, and it is worth restating as a saving
+rather than a cost — three milestones of presenter and view work now get written once.
