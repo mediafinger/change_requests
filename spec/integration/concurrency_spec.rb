@@ -44,7 +44,7 @@ RSpec.describe "concurrency", :concurrent do
     ChangeRequests.operations.define("members.update_roles") do |op|
       op.version = "2026-09-12"
       op.service = "Members::UpdateRoles"
-      op.approvals permissions: %w(member_admin), required: 2
+      op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
     end
     # Built here too, before anything is spawned. RSpec's memoized helpers are not synchronised, so
     # a `let` first touched inside a thread is a race of its own - and two threads can each end up
@@ -67,8 +67,8 @@ RSpec.describe "concurrency", :concurrent do
     let(:third) { approver("Cara") }
 
     before do
-      ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(member_admin),
-                                                                  required: 2)
+      ChangeRequests.operations["members.update_roles"]
+                    .workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
       ChangeRequests::Commands::Approve.call(request: change_request, actor: first)
     end
 

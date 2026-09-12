@@ -7,9 +7,6 @@ module ChangeRequests
   #
   # M2 adds `op.cooldown`, `op.override` and `Operations#verify!`.
   class Operation
-    # change_request_stages.name is NOT NULL, and the shorthand declares no stage of its own.
-    DEFAULT_STAGE_NAME = "approval"
-
     attr_reader :key
     attr_accessor :version, :service, :payload_labels, :idempotent
     attr_writer :method_name, :max_attempts
@@ -48,8 +45,9 @@ module ChangeRequests
       @expires_in     = value
     end
 
-    # Without a block, the reader `Commands::Create` walks. With one, the §6.4 / §6.9 declaration:
-    # ordered stages, each holding one inline quorum or a block of named ones.
+    # Without a block, the reader `Commands::Create` walks. With one, the §6.4 / §6.9 declaration -
+    # the only way to say who approves: ordered stages, each holding one inline quorum or a block of
+    # named ones.
     #
     # Replaces any previous description - it is "the approval rule for this operation", not one of
     # several - and the new one is only installed once it has built without refusing.
@@ -57,20 +55,6 @@ module ChangeRequests
       return @workflow unless block
 
       @workflow = Workflow::Builder.build(operation_key: key, &block)
-    end
-
-    # The §6.4 shorthand: one stage, one quorum, no ceremony. Replaces any previous description.
-    # Removed by M2-2; `op.workflow`'s single-quorum stage says the same thing.
-    def approvals(permissions: nil, actor_type: nil, eligible_actors: nil, match: nil, required: 1)
-      builder = Workflow::StageBuilder.new(operation_key: key, source: "op.approvals",
-                                           threshold_keyword: :required)
-      builder.quorum(permissions: permissions, actor_type: actor_type,
-                     eligible_actors: eligible_actors, match: match, threshold: required)
-
-      @workflow = Workflow.new(
-        [Workflow::Stage.new(name: DEFAULT_STAGE_NAME, position: 1, satisfied_by: :any_quorum,
-                             quorums: builder.quorums)]
-      )
     end
 
     def validate!

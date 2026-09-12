@@ -3,23 +3,6 @@
 RSpec.describe ChangeRequests::Operation do
   subject(:operation) { described_class.new("members.update_roles") }
 
-  let(:cfo) { Struct.new(:id, :name).new(1, "Cleo") }
-  let(:general_counsel) { Struct.new(:id, :name).new(2, "Gene") }
-
-  def permission(permission = nil, actor_type = nil)
-    ChangeRequests::Workflow::Permission.new(permission: permission, actor_type: actor_type)
-  end
-
-  def declared_quorum(**)
-    operation.approvals(**)
-    stage = operation.workflow.stages.first
-
-    expect(operation.workflow.stages.size).to eq(1)
-    expect(stage.quorums.size).to eq(1)
-
-    stage.quorums.first
-  end
-
   describe "attributes" do
     it "keeps the key as a string, whatever it was declared as" do
       expect(described_class.new(:"members.update_roles").key).to eq("members.update_roles")
@@ -40,7 +23,7 @@ RSpec.describe ChangeRequests::Operation do
     end
 
     it "starts with no workflow at all, so an operation must declare who approves it" do
-      expect(operation.workflow.stages).to be_empty
+      expect(operation.workflow).to be_empty
     end
   end
 
@@ -91,162 +74,6 @@ RSpec.describe ChangeRequests::Operation do
       operation.version = "  "
 
       expect { operation.validate! }.to raise_error(ChangeRequests::ConfigurationError, /version/)
-    end
-  end
-
-  describe "#approvals" do
-    it "describes one stage holding one quorum (§6.4)" do
-      operation.approvals permissions: %w(member_admin), required: 2
-      stage = operation.workflow.stages.first
-
-      expect(operation.workflow.stages.size).to eq(1)
-      expect(stage.position).to eq(1)
-      expect(stage.satisfied_by).to eq(:any_quorum)
-      expect(stage.quorums.size).to eq(1)
-    end
-
-    it "names the stage, because change_request_stages.name is NOT NULL (§5.2)" do
-      operation.approvals permissions: %w(member_admin), required: 2
-
-      expect(operation.workflow.stages.first.name).to eq("approval")
-    end
-
-    it "leaves the quorum nameless - 'which quorum' is not a meaningful question here (§5.9)" do
-      quorum = declared_quorum(permissions: %w(member_admin), required: 2)
-
-      expect(quorum.name).to be_nil
-      expect(quorum.position).to eq(1)
-    end
-
-    it "replaces the previous description rather than appending a second stage" do
-      operation.approvals permissions: %w(member_admin), required: 2
-      operation.approvals actor_type: "Admin", required: 1
-
-      expect(operation.workflow.stages.size).to eq(1)
-      expect(operation.workflow.stages.first.quorums.first.threshold).to eq(1)
-    end
-
-    context "form (a): two holders of a permission" do
-      subject(:quorum) { declared_quorum(permissions: %w(member_admin), required: 2) }
-
-      it "counts to the declared threshold" do
-        expect(quorum.threshold).to eq(2)
-      end
-
-      it "describes one permission row, unconstrained by actor type (§5.3)" do
-        expect(quorum.permissions).to eq([permission("member_admin")])
-      end
-
-      it "names nobody in particular" do
-        expect(quorum.eligible_actors).to be_empty
-      end
-    end
-
-    context "form (b): one actor of a class" do
-      subject(:quorum) { declared_quorum(actor_type: "Admin", required: 1) }
-
-      it "describes one permission row constraining the type and nothing else" do
-        expect(quorum.permissions).to eq([permission(nil, "Admin")])
-      end
-
-      it "counts one approval" do
-        expect(quorum.threshold).to eq(1)
-      end
-    end
-
-    context "form (c): one person holding both permissions" do
-      subject(:quorum) do
-        declared_quorum(permissions: %w(finance compliance), match: :all, required: 1)
-      end
-
-      it "describes a row per permission" do
-        expect(quorum.permissions).to eq([permission("finance"), permission("compliance")])
-      end
-
-      it "carries the declared match, so both are required of the same actor" do
-        expect(quorum.permission_match).to eq(:all)
-      end
-    end
-
-    context "form (d): only these two people" do
-      subject(:quorum) { declared_quorum(eligible_actors: [cfo, general_counsel], required: 2) }
-
-      it "names the approvers, in the order they were declared" do
-        expect(quorum.eligible_actors).to eq([cfo, general_counsel])
-      end
-
-      it "constrains eligibility by name alone" do
-        expect(quorum.permissions).to be_empty
-        expect(quorum.threshold).to eq(2)
-      end
-
-      # Resolving (type, id) here would call actor_attributes before the host's config file has
-      # necessarily run, and would raise UnknownActorType from an initializer. Create resolves.
-      it "keeps the actor objects as declared, resolving nothing" do
-        expect(quorum.eligible_actors.first).to equal(cfo)
-      end
-    end
-
-    context "with the hash form of permissions, which M2's op.workflow also accepts" do
-      it "reads :permission and :actor_type off each entry (§5.3)" do
-        quorum = declared_quorum(permissions: [{ actor_type: "Admin" }, { permission: "owner" }],
-                                 required: 1)
-
-        expect(quorum.permissions).to eq([permission(nil, "Admin"), permission("owner")])
-      end
-
-      it "accepts a bare hash, not only a hash in an array" do
-        quorum = declared_quorum(permissions: { permission: "owner", actor_type: "User" },
-                                 required: 1)
-
-        expect(quorum.permissions).to eq([permission("owner", "User")])
-      end
-    end
-
-    it "applies actor_type: to every permission given alongside it" do
-      quorum = declared_quorum(permissions: %w(editor owner), actor_type: "User", required: 1)
-
-      expect(quorum.permissions).to eq([permission("editor", "User"), permission("owner", "User")])
-    end
-
-    it "defaults the threshold to one approval" do
-      expect(declared_quorum(permissions: %w(owner)).threshold).to eq(1)
-    end
-
-    it "resolves an undeclared match lazily from the host's default (§5.3)" do
-      quorum = declared_quorum(permissions: %w(finance compliance))
-      ChangeRequests.config.default_permission_match = :all
-
-      expect(quorum.permission_match).to eq(:all)
-    end
-
-    describe "declaration-time refusals" do
-      it "refuses a quorum nobody can qualify for" do
-        expect { operation.approvals(required: 2) }
-          .to raise_error(ChangeRequests::ConfigurationError, /permissions|actor_type|eligible_actors/)
-      end
-
-      it "refuses a threshold below one, which no approval could ever reach" do
-        expect { operation.approvals(permissions: %w(owner), required: 0) }
-          .to raise_error(ChangeRequests::ConfigurationError, /required/)
-      end
-
-      it "refuses a non-integer threshold" do
-        expect { operation.approvals(permissions: %w(owner), required: 1.5) }
-          .to raise_error(ChangeRequests::ConfigurationError, /required/)
-      end
-
-      it "refuses a match the quorum column would reject" do
-        expect { operation.approvals(permissions: %w(owner), match: :either) }
-          .to raise_error(ChangeRequests::ConfigurationError, /match/)
-      end
-
-      it "leaves the previous description in place when it refuses" do
-        operation.approvals permissions: %w(owner), required: 2
-
-        expect { operation.approvals(required: 3) }.to raise_error(ChangeRequests::ConfigurationError)
-        expect(operation.workflow.stages.first.quorums.first.threshold).to eq(2)
-      end
     end
   end
 end

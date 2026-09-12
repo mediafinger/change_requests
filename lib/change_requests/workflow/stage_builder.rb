@@ -4,16 +4,14 @@ module ChangeRequests
   class Workflow
     # The `q` of `w.stage :name do |q| … end`, and the one place a declared quorum becomes a
     # Workflow::Quorum. The single-quorum stage shorthand routes through it too, so one
-    # normalisation and one set of refusals serve every spelling (§5.3, §6.9).
+    # normalisation and one set of refusals serve both forms (§5.3, §6.9).
     class StageBuilder
       attr_reader :quorums
 
-      def initialize(operation_key:, stage_name: nil, source: "op.workflow", threshold_keyword: :threshold)
-        @operation_key     = operation_key
-        @stage_name        = stage_name
-        @source            = source
-        @threshold_keyword = threshold_keyword
-        @quorums           = []
+      def initialize(operation_key:, stage_name:)
+        @operation_key = operation_key
+        @stage_name    = stage_name
+        @quorums       = []
       end
 
       def quorum(name = nil, permissions: nil, actor_type: nil, eligible_actors: nil, match: nil, threshold: 1)
@@ -32,7 +30,7 @@ module ChangeRequests
 
       private
 
-      attr_reader :operation_key, :stage_name, :source, :threshold_keyword
+      attr_reader :operation_key, :stage_name
 
       def permission_rows(permissions, actor_type)
         entries = list(permissions)
@@ -66,10 +64,9 @@ module ChangeRequests
       end
 
       def context(quorum_name = nil)
-        return source if stage_name.nil?
-        return "#{source} stage #{stage_name.to_sym.inspect}" if quorum_name.nil?
+        return "op.workflow stage #{stage_name.to_sym.inspect}" if quorum_name.nil?
 
-        "#{source} stage #{stage_name.to_sym.inspect} quorum #{quorum_name.to_sym.inspect}"
+        "op.workflow stage #{stage_name.to_sym.inspect} quorum #{quorum_name.to_sym.inspect}"
       end
 
       def prefix
@@ -97,7 +94,7 @@ module ChangeRequests
 
       def refuse_threshold(quorum_name, threshold)
         fail ConfigurationError,
-             "#{prefix}: #{context(quorum_name)} #{threshold_keyword}: #{threshold.inspect}. " \
+             "#{prefix}: #{context(quorum_name)} threshold: #{threshold.inspect}. " \
              "It must be an integer of at least 1 - one approval is the minimum, not zero."
       end
 

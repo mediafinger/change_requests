@@ -76,7 +76,7 @@ module ChangeRequests
 
         if declaration.workflow.empty?
           problems << "it declares no approvals, so a request could never be approved - " \
-                      "declare `op.approvals`"
+                      "declare `op.workflow`"
         end
 
         return if problems.empty?

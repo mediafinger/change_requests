@@ -3,7 +3,7 @@
 module ChangeRequests
   class Workflow
     # One counting rule of the described workflow (§5.3). `name` is null when its stage holds
-    # exactly one quorum - the `op.approvals` shorthand (§5.9).
+    # exactly one quorum - `w.stage` without a block (§5.9).
     #
     # `eligible_actors` holds the actor objects as the host declared them. Resolving them to
     # (type, id) here would call `actor_attributes` from an initializer, before the file that
