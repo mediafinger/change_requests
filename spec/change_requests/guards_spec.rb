@@ -26,7 +26,7 @@ module GuardMatrix
     "approved" => %i(not_pending not_pending not_pending allowed allowed
                      allowed not_expired),
     "executing" => %i(not_pending not_pending not_pending executing allowed
-                      not_approved not_expirable),
+                      executing not_expirable),
     "failed" => %i(not_pending not_pending not_pending allowed allowed
                    allowed not_expirable),
     "successful" => %i(already_finalized already_finalized already_finalized already_finalized allowed

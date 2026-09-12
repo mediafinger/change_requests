@@ -4,8 +4,8 @@ module ChangeRequests
   module Guards
     # May this actor execute this request (§7.2, §8)?
     #
-    # **Guard only.** `Commands::Execute`, the claim-then-invoke machinery and the §8.1 override
-    # branch are M3a (decision D2). The guard's inputs are all M1 state; the claim is not.
+    # The §8.1 override branch is M3a-5. `Execution::Runner` drives the claim behind
+    # `Commands::Execute`.
     #
     # Separation of duties is the one rule here with no counterpart in the other guards. `Approve`
     # refuses the requester by identity and consults nothing (I5); `Execute` refuses them *unless*
@@ -19,6 +19,9 @@ module ChangeRequests
       def refusal
         # `successful` is final, and "already done" is a better answer than "not approved".
         return :already_finalized if request.final?
+        # Ahead of :not_approved, which would be untrue of a request that is approved and mid-flight.
+        # T1's conditional UPDATE is the invariant beneath this, raising ExecutionInProgress (§8).
+        return :executing if request.executing?
         return :not_approved unless EXECUTABLE_STATUSES.include?(request.status)
         return :attempts_exhausted if request.failed? && !request.retryable?
         return :not_permitted unless actor_type.may_execute

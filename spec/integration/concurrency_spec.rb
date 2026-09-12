@@ -28,6 +28,30 @@ class UnlockedApprove < TimedApprove
   end
 end
 
+# A target that stops inside T2 and waits, so the row can be inspected while it runs. Queues
+# rather than sleeps: the handshake is deterministic and the spec has no timing window.
+class BlockingTarget
+  class << self
+    attr_accessor :entered, :release
+
+    def call(**)
+      entered << :in
+      release.pop
+
+      :done
+    end
+  end
+end
+
+# The runner with the three transactions wrongly collapsed under one lock - the teeth for the
+# measurement below, in the same shape as UnlockedApprove: same probe, one thing changed,
+# opposite result. Without it, a NOWAIT that always succeeds would look like proof.
+class LockedRunner < ChangeRequests::Execution::Runner
+  def call
+    request.with_lock { super }
+  end
+end
+
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "concurrency", :concurrent do
   self.use_transactional_tests = false
@@ -228,6 +252,93 @@ RSpec.describe "concurrency", :concurrent do
 
       expect(overlap.count).to eq(2)
       expect(overlap).to be_any
+    end
+  end
+
+  # 5. §8's second requirement: no row lock may be held across the target invocation. Measured
+  # rather than asserted - a NOWAIT lock attempt while the target runs either succeeds or does not.
+  describe "the row lock across T2 (§8)" do
+    let(:executer) { Manager.create!(id: "mgr-1", name: "Olive", roles: %w(ops)) }
+
+    # The request was materialised under the outer declaration, whose quorum wants two - the
+    # rows are the frozen snapshot, so re-declaring a threshold of one would change nothing
+    # (§6.12 point 4). Only the service needs redeclaring: dispatch reads it live.
+    before do
+      BlockingTarget.entered = Queue.new
+      BlockingTarget.release = Queue.new
+
+      ChangeRequests.operations["members.update_roles"].service = "BlockingTarget"
+
+      ChangeRequests::Commands::Approve.call(request: change_request, actor: approver("Ada"))
+      ChangeRequests::Commands::Approve.call(request: change_request, actor: approver("Ben"))
+
+      # Touched here, never first inside a thread: memoized helpers are not synchronised, and a
+      # `let` that creates a row would create it on the worker's connection.
+      executer
+    end
+
+    # True when the row can be locked right now. FOR UPDATE NOWAIT raises instead of waiting, so
+    # this answers the question without a timeout and without a sleep.
+    def lockable?
+      ChangeRequests::Request.lock("FOR UPDATE NOWAIT").find(change_request.id)
+
+      true
+    rescue ActiveRecord::LockWaitTimeout, ActiveRecord::StatementInvalid
+      false
+    end
+
+    # Runs the given runner class in its own thread and asks the question mid-T2.
+    def lockable_while_target_runs?(runner)
+      worker = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          runner.call(request: ChangeRequests::Request.find(change_request.id), actor: executer)
+        end
+      end
+
+      await_target(worker)
+
+      lockable?.tap do
+        BlockingTarget.release << :go
+        worker.join
+      end
+    end
+
+    # Fails loudly rather than hanging: a worker refused before it reaches the target would
+    # otherwise leave this blocked on a queue nobody will ever push to.
+    def await_target(worker)
+      return if BlockingTarget.entered.pop(timeout: 10)
+
+      worker.kill
+
+      fail "the target was never invoked - the runner raised before T2: #{worker.value.inspect}"
+    end
+
+    it "is released before the target is invoked, so another process can take the row" do
+      expect(lockable_while_target_runs?(ChangeRequests::Execution::Runner)).to be(true)
+    end
+
+    it "is held when the three transactions are collapsed into one, which is the teeth" do
+      expect(lockable_while_target_runs?(LockedRunner)).to be(false)
+    end
+
+    it "leaves the request executing while the target runs, which is what the UI shows" do
+      worker = Thread.new do
+        ActiveRecord::Base.connection_pool.with_connection do
+          ChangeRequests::Execution::Runner.call(
+            request: ChangeRequests::Request.find(change_request.id), actor: executer
+          )
+        end
+      end
+
+      await_target(worker)
+
+      expect(reload.status).to eq("executing")
+      expect(reload.attempts.sole).to have_attributes(number: 1, outcome: nil)
+
+      BlockingTarget.release << :go
+      worker.join
+
+      expect(reload.status).to eq("successful")
     end
   end
 end
