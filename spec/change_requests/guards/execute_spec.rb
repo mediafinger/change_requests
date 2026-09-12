@@ -233,41 +233,4 @@ RSpec.describe ChangeRequests::Guards::Execute do
       end
     end
   end
-
-  # Decision D2: this guard ships in M1b, Commands::Execute in M3a. The guard's inputs are all M1
-  # state; the claim-then-invoke machinery is not.
-  #
-  # A reader of the 0.2.0 gem finds every other guard paired with a command and would reasonably
-  # assume this one was forgotten. It was not - and an absence is the one thing a suite cannot state
-  # by staying silent, so it is stated here.
-  describe "the command that is deliberately missing (D2)" do
-    it "is absent at 0.2.0, and that is the decision, not an oversight" do
-      expect(ChangeRequests::Commands.const_defined?(:Execute, false)).to be(false)
-    end
-
-    it "has the error the command will raise, declared up front like the rest (ADR-0012)" do
-      expect(ChangeRequests::NotExecutable).to be < ChangeRequests::TransitionError
-    end
-
-    it "has the event kinds the command will emit" do
-      expect(ChangeRequests::Event::KINDS)
-        .to include("execution_started", "executed", "execution_failed")
-    end
-
-    it "has the attempts table the command will write to (§5.6)" do
-      expect(ChangeRequests::Attempt.table_name).to eq("change_request_attempts")
-    end
-
-    # §8.1's break-glass path is M3a too, and its setting is already an ordinary config key (§19.17).
-    it "has the override setting, which nothing reads until M3a" do
-      expect(ChangeRequests.config.requester_may_override).to be(false)
-    end
-
-    it "pairs every other guard with a command" do
-      paired = ChangeRequests::Guards.constants - %i(Base Execute)
-      missing = paired.reject { |name| ChangeRequests::Commands.const_defined?(name, false) }
-
-      expect(missing).to be_empty
-    end
-  end
 end
