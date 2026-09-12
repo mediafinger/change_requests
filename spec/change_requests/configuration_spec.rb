@@ -248,4 +248,42 @@ RSpec.describe ChangeRequests::Configuration do
       expect(copy.authorization).not_to equal(config.authorization)
     end
   end
+
+  # §8, §10. Three keys M3b-1 added; §10 listed them long before the class had any of them.
+  describe "execution mode (§8)" do
+    it "runs inline unless the host says otherwise" do
+      expect(config.execution_mode).to eq(:inline)
+    end
+
+    it "names the gem's own job class by default, as a string" do
+      expect(config.job_class).to eq("ChangeRequests::Execution::Job")
+      expect(config.job_queue).to eq(:default)
+    end
+
+    it "refuses an unknown mode" do
+      config.execution_mode = :whenever
+
+      expect(config.problems.join).to match(/execution_mode.*:inline or :background/)
+    end
+
+    # Deliberately not checked for resolvability: a headless process may have :background
+    # configured and no ActiveJob, and refusing that would fail a boot that works (§8).
+    it "accepts :background, which a process without ActiveJob may still configure" do
+      config.execution_mode = :background
+
+      expect(config.problems.grep(/execution_mode|job_/)).to be_empty
+    end
+
+    it "refuses a job_class that is not a name" do
+      config.job_class = nil
+
+      expect(config.problems.join).to include("job_class")
+    end
+
+    it "refuses an empty queue" do
+      config.job_queue = "  "
+
+      expect(config.problems.join).to include("job_queue")
+    end
+  end
 end

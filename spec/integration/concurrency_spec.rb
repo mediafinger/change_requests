@@ -409,12 +409,16 @@ RSpec.describe "concurrency", :concurrent do
       # Exactly one loser, refused. *Which* refusal depends on how far the winner got before the
       # loser took the lock - mid-flight is :executing, finished is :already_finalized - and
       # asserting one of them would be a spec that fails the build on a slow morning (Q50).
+      #
+      # The class varies with it: REASON_ERRORS maps :already_finalized to AlreadyFinalized on
+      # purpose, so a host rescuing that catches the guard and the model's TerminalStateGuard
+      # alike (§5.8). TransitionError is what both are, and #reason is what both carry.
       it "refuses exactly one of them, and tells it something true" do
         outcomes = execute_in_parallel
+        refusal = refusals(outcomes).sole
 
-        expect(refusals(outcomes).size).to eq(1)
-        expect(refusals(outcomes).first).to be_a(ChangeRequests::NotExecutable)
-        expect(refusals(outcomes).first.reason).to be_in(%i(executing already_finalized))
+        expect(refusal).to be_a(ChangeRequests::TransitionError)
+        expect(refusal.reason).to be_in(%i(executing already_finalized))
       end
 
       it "emits one execution_started, so the timeline does not claim two runs" do

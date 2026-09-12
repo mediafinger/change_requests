@@ -57,6 +57,39 @@ module ChangeRequests
                             payload: payload, tenant: tenant)
     end
 
+    # §8's background mode, on the same terms as the engine: idempotent, public, and guarded so
+    # requiring the gem in a process without ActiveJob defines no job at all. A host that loads
+    # ActiveJob after this gem calls it again - the engine does that automatically on_load.
+    def load_execution_job!
+      # archspec:disable-next-line dependencies.forbid -- the loader must name what it loads (§1)
+      return false if defined?(ChangeRequests::Execution::Job)
+      # archspec:disable-next-line constants.forbid -- the guard that keeps ActiveJob optional (§8)
+      return false unless defined?(::ActiveJob::Base)
+
+      require_relative "change_requests/execution/job"
+
+      true
+    end
+
+    # What a headless process asks before trusting `execution_mode = :background`.
+    def background_available?
+      # archspec:disable-next-line dependencies.forbid -- the same reference, as a question (§8)
+      defined?(ChangeRequests::Execution::Job) ? true : false
+    end
+
+    # The configured job class, resolved at enqueue time and never held: a reloading application
+    # redefines it, and §10 makes the setting a string for that reason.
+    def background_job!
+      job = config.job_class.to_s.safe_constantize
+
+      return job unless job.nil?
+
+      fail ConfigurationError,
+           "config.execution_mode is :background but config.job_class " \
+           "(#{config.job_class.inspect}) does not resolve. ChangeRequests::Execution::Job is " \
+           "defined only where ActiveJob is loaded, which this process has not done (§8)."
+    end
+
     def configure
       yield(config)
 
@@ -97,8 +130,10 @@ module ChangeRequests
         loader.ignore("#{__dir__}/change_requests/version.rb")
         loader.ignore("#{__dir__}/change_requests/errors.rb")
 
-        # Autoloading it would let an eager load in a headless process require Rails.
+        # Autoloading either would let an eager load pull in something optional: Rails for the
+        # engine, ActiveJob for the job - which defines nothing at all when ActiveJob is absent.
         loader.ignore("#{__dir__}/change_requests/engine.rb")
+        loader.ignore("#{__dir__}/change_requests/execution/job.rb")
 
         loader.setup
       end
@@ -108,3 +143,4 @@ end
 
 ChangeRequests.setup_loader
 ChangeRequests.load_engine!
+ChangeRequests.load_execution_job!

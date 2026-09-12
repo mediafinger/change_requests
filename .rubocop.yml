@@ -20,10 +20,11 @@ RSpec:
     - spec/integration/headless_script.rb
 
 Naming/PredicateMethod:
-  # `load_engine!` acts and reports whether it acted, like `save!`. The bang is the point; a `?` name
-  # would promise a question that does nothing.
+  # These act and report whether they acted, like `save!`. The bang is the point; a `?` name would
+  # promise a question that does nothing.
   AllowedMethods:
     - load_engine!
+    - load_execution_job!
 
 Naming/FileName:
   Exclude:

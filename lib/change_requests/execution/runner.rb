@@ -18,7 +18,12 @@ module ChangeRequests
         new(request: request, actor: actor, override: override, reason: reason).call
       end
 
-      def initialize(request:, actor:, override: false, reason: nil)
+      # T2 and T3 alone: T1 committed in another process, which is what Execution::Job resumes.
+      def self.finish(request:, attempt:)
+        new(request: request).finish(attempt)
+      end
+
+      def initialize(request:, actor: nil, override: false, reason: nil)
         @request  = request
         @actor    = actor
         @override = override
@@ -29,6 +34,14 @@ module ChangeRequests
         attempt = Commands::ClaimExecution.call(request: request, actor: actor,
                                                 override: override, reason: reason)
 
+        # T1 commits either way, so the request is visibly `executing` the moment this returns -
+        # which is the whole reason background mode does not enqueue the claim as well (§8).
+        return enqueue(attempt) if background?
+
+        finish(attempt)
+      end
+
+      def finish(attempt)
         begin
           invoke
         rescue StandardError => e
@@ -47,6 +60,20 @@ module ChangeRequests
 
       attr_reader :request, :actor, :override, :reason
 
+      def background?
+        ChangeRequests.config.execution_mode == :background
+      end
+
+      # The ids, not the objects: §8's job takes what survives serialisation. Returns the claimed
+      # request, so a caller sees what inline mode gives it - a row, already `executing`.
+      def enqueue(attempt)
+        ChangeRequests.background_job!
+                      .set(queue: ChangeRequests.config.job_queue)
+                      .perform_later(request.id, attempt.id)
+
+        request.reload
+      end
+
       def invoke
         Dispatcher.call(operation_key: request.operation_key, payload: request.payload,
                         change_request_id: request.id)
@@ -62,8 +89,10 @@ module ChangeRequests
         "#{operation.service}.#{operation.method_name}"
       end
 
+      # No actor: the attempt carries the executer's triple from T1, which is what T3 records.
+      # That is what lets the job settle a claim it did not make (§5.6).
       def settle(attempt, error)
-        Commands::SettleExecution.call(request: request, actor: actor, attempt: attempt, error: error)
+        Commands::SettleExecution.call(request: request, attempt: attempt, error: error)
       end
     end
   end

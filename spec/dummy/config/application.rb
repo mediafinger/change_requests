@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "active_record/railtie"
+require "active_job/railtie" # §8's background execution mode, exercised in M3b's specs
 
 # ActionController and friends deliberately absent: nothing in Milestone 1 renders. M6 adds them.
 require "change_requests"
