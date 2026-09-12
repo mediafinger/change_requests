@@ -79,7 +79,7 @@ RSpec.describe ChangeRequests::Refusal do
     # The host names every stage - `op.workflow` invents none - so the gem has no name to translate
     # and ships neither namespace. Both are comment blocks showing a host how to add their own.
     it "ships no stage or quorum names of its own" do
-      expect(translations.keys).to eq(%w(errors))
+      expect(translations.keys).to eq(%w(errors events))
     end
 
     it "humanizes every stage name, there being no entry to prefer" do

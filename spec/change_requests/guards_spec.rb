@@ -15,28 +15,35 @@ require "rails_helper"
 # The table itself, hoisted out of the example group so it is available when examples are defined -
 # the same shape as GuardProbes and CommandProbes elsewhere in the suite.
 module GuardMatrix
-  ALL = %i(Approve Unapprove Reject Cancel Comment Execute Expire).freeze
+  ALL = %i(Approve Unapprove Reject Cancel Comment Execute Expire Reap).freeze
+
+  # Read with no actor: nobody expires or reaps a request on purpose, so supplying one is itself
+  # the refusal (:not_system) and every other cell would be unreachable.
+  SYSTEM_ONLY = %i(Expire Reap).freeze
 
   # One row per status. `-` means the guard permits it.
   #
-  # Columns, in order: Approve, Unapprove, Reject, Cancel, Comment, Execute, Expire.
+  # Columns, in order: Approve, Unapprove, Reject, Cancel, Comment, Execute, Expire, Reap.
+  #
+  # Reap's `:not_stuck` on the `executing` row is the same shape as Expire's `:not_expired` on
+  # `pending`: the status is right and the clock is not. Neither depends on the actor axis.
   BY_STATUS = {
     "pending" => %i(allowed not_the_approver allowed allowed allowed
-                    not_approved not_expired),
+                    not_approved not_expired not_executing),
     "approved" => %i(not_pending not_pending not_pending allowed allowed
-                     allowed not_expired),
+                     allowed not_expired not_executing),
     "executing" => %i(not_pending not_pending not_pending executing allowed
-                      executing not_expirable),
+                      executing not_expirable not_stuck),
     "failed" => %i(not_pending not_pending not_pending allowed allowed
-                   allowed not_expirable),
+                   allowed not_expirable not_executing),
     "successful" => %i(already_finalized already_finalized already_finalized already_finalized allowed
-                       already_finalized already_finalized),
+                       already_finalized already_finalized already_finalized),
     "rejected" => %i(already_finalized already_finalized already_finalized already_finalized allowed
-                     already_finalized already_finalized),
+                     already_finalized already_finalized already_finalized),
     "canceled" => %i(already_finalized already_finalized already_finalized already_finalized allowed
-                     already_finalized already_finalized),
+                     already_finalized already_finalized already_finalized),
     "expired" => %i(already_finalized already_finalized already_finalized already_finalized allowed
-                    already_finalized already_finalized),
+                    already_finalized already_finalized already_finalized),
   }.freeze
 end
 
@@ -60,11 +67,9 @@ RSpec.describe ChangeRequests::Guards do
     change_request.reload
   end
 
-  # Expire is system-only, so its cell is read with no actor; every other guard is read as an
-  # eligible approver who has not yet decided.
   def reason_for(guard_name, change_request, actor: approver)
-    guard = described_class.const_get(guard_name)
-                           .new(request: change_request, actor: guard_name == :Expire ? nil : actor)
+    acting = GuardMatrix::SYSTEM_ONLY.include?(guard_name) ? nil : actor
+    guard = described_class.const_get(guard_name).new(request: change_request, actor: acting)
 
     guard.reason || :allowed
   end
@@ -105,9 +110,9 @@ RSpec.describe ChangeRequests::Guards do
       change_request = build("canceled")
 
       classes = (GuardMatrix::ALL - [:Comment]).map do |name|
-        described_class.const_get(name)
-                       .new(request: change_request, actor: name == :Expire ? nil : approver)
-                       .check!
+        acting = GuardMatrix::SYSTEM_ONLY.include?(name) ? nil : approver
+
+        described_class.const_get(name).new(request: change_request, actor: acting).check!
       rescue ChangeRequests::Error => e
         e.class
       end
@@ -175,14 +180,26 @@ RSpec.describe ChangeRequests::Guards do
       expect(guard.reason).to eq(:not_system)
     end
 
-    # §5.11 as amended by I8, run here across the whole set rather than one guard at a time.
-    it "refuses an undeclared operation everywhere but Comment" do
+    # §5.11 as amended by I8, Q9 and M3b-2, run here across the whole set rather than one guard
+    # at a time. Comment stays open because a stranded request is exactly the one worth
+    # annotating; Cancel because it is the one worth clearing away; Reap because a claim that died
+    # is dead whatever the registry says - and Cancel refuses `executing`, so nothing else could
+    # reach such a row.
+    it "refuses an undeclared operation everywhere but Comment, Cancel and Reap" do
       change_request = build("pending")
       ChangeRequests.operations.clear
 
       refusing = GuardMatrix::ALL.select { |name| reason_for(name, change_request) == :operation_undeclared }
 
-      expect(refusing).to match_array(GuardMatrix::ALL - [:Comment])
+      expect(refusing).to match_array(GuardMatrix::ALL - %i(Comment Cancel Reap))
+    end
+
+    it "leaves an undeclared request cancelable by an actor with no standing at all (Q9)" do
+      change_request = build("pending")
+      ChangeRequests.operations.clear
+
+      expect(reason_for(:Cancel, change_request, actor: Admin.create!(name: "Nobody")))
+        .to eq(:allowed)
     end
 
     # Every reason any guard can produce has to be in the shared vocabulary, and M1b-13's locale

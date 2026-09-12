@@ -19,13 +19,23 @@ module ChangeRequests
 
         # Emitted before the status changes, so the trail records the request as it was cancelled
         # rather than as it ended up.
-        emit(:canceled, body: reason, metadata: { status: request.status })
+        emit(event_kind, body: reason, metadata: metadata)
         request.update!(status: "canceled")
 
         request
       end
 
       private
+
+      # The two seams CancelUndeclared overrides, and the whole of the difference between them:
+      # who cancelled decides which fact the timeline records (Q11, §5.11).
+      def event_kind
+        :canceled
+      end
+
+      def metadata
+        { status: request.status }
+      end
 
       def reason
         options[:reason]

@@ -107,6 +107,107 @@ RSpec.describe ChangeRequests::Request do
         expect(described_class.expired_candidates).to be_empty
       end
     end
+
+    describe ".stuck_executions" do
+      def executing_with(started_at:, outcome: nil)
+        request = described_class.create!(**attributes, status: "executing")
+        request.attempts.create!(number: 1, started_at: started_at, outcome: outcome)
+
+        request
+      end
+
+      it "finds a claimed request whose attempt never finished" do
+        executing_with(started_at: 2.hours.ago)
+
+        expect(described_class.stuck_executions.count).to eq(1)
+      end
+
+      it "leaves one claimed a moment ago" do
+        executing_with(started_at: 1.minute.ago)
+
+        expect(described_class.stuck_executions).to be_empty
+      end
+
+      it "leaves one whose attempt finished, however long ago it started" do
+        executing_with(started_at: 2.hours.ago, outcome: "succeeded")
+
+        expect(described_class.stuck_executions).to be_empty
+      end
+
+      it "leaves one that is not executing" do
+        request # pending, and with no attempt at all
+
+        expect(described_class.stuck_executions).to be_empty
+      end
+
+      it "takes the threshold from its caller" do
+        executing_with(started_at: 5.minutes.ago)
+
+        expect(described_class.stuck_executions(60).count).to eq(1)
+        expect(described_class.stuck_executions(3600)).to be_empty
+      end
+
+      # The scope and Guards::Reap must agree, or the sweeper hands the command rows it refuses.
+      it "agrees with Guards::Reap on every request it finds and every one it does not" do
+        candidates = [executing_with(started_at: 2.hours.ago),
+                      executing_with(started_at: 1.minute.ago),
+                      executing_with(started_at: 2.hours.ago, outcome: "failed"),
+                      request]
+
+        swept = described_class.stuck_executions.to_a
+        permitted = candidates.select do |candidate|
+          ChangeRequests::Guards::Reap.new(request: candidate, actor: nil).allowed?
+        end
+
+        expect(swept).to match_array(permitted)
+      end
+    end
+
+    describe ".undeclared" do
+      before do
+        ChangeRequests.operations.define("members.update_roles") do |op|
+          op.version = "1"
+          op.service = "Probes::Target"
+          op.workflow { |w| w.stage :approval, permissions: %w(owner) }
+        end
+      end
+
+      it "finds an open request with no live declaration" do
+        request
+        ChangeRequests.operations.clear
+
+        expect(described_class.undeclared.count).to eq(1)
+      end
+
+      it "leaves one whose operation is still declared" do
+        request
+
+        expect(described_class.undeclared).to be_empty
+      end
+
+      it "leaves a finished request - canceled is final, and it is already over" do
+        described_class.create!(**attributes, status: "canceled")
+        ChangeRequests.operations.clear
+
+        expect(described_class.undeclared).to be_empty
+      end
+
+      # Guards::Cancel refuses a request mid-flight whether or not it is declared (Q28).
+      it "leaves one whose target is executing, which the reaper clears instead" do
+        described_class.create!(**attributes, status: "executing")
+        ChangeRequests.operations.clear
+
+        expect(described_class.undeclared).to be_empty
+      end
+
+      it "finds everything open when nothing at all is declared" do
+        request
+        described_class.create!(**attributes, status: "approved")
+        ChangeRequests.operations.clear
+
+        expect(described_class.undeclared.count).to eq(2)
+      end
+    end
   end
 
   describe "validations" do

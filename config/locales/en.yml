@@ -37,10 +37,17 @@ en:
       not_cancelable: "This request cannot be cancelled."
       not_executable: "This request cannot be executed."
       not_rejectable: "This request cannot be rejected."
+      not_executing: "This request is not being executed."
+      not_stuck: "This request's execution has not been running long enough to write off."
       not_unapprovable: "This decision cannot be taken back."
       override_not_permitted: "You are not allowed to override the approvals."
       quorum_not_met: "This request does not have the approvals it needs."
       transition_error: "This request will not accept that."
+
+    # Event bodies the gem writes for itself, where there is no actor to supply one. Translatable
+    # rather than a hardcoded sentence, with the same fallback every other lookup has (§5.11).
+    events:
+      operation_undeclared: "This operation is no longer declared, so the request could never run."
 
     # Stage and quorum names are declaration identifiers, not display text (§5.9). The host names
     # every stage, so the gem ships no entry here at all: a host adds a key per name it declares,
