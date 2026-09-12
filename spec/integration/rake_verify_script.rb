@@ -7,12 +7,18 @@ ENV["RAILS_ENV"] ||= "test"
 
 require_relative "../dummy/config/environment"
 
+# A target meeting §6.12's contract: a public singleton method taking keyword arguments only.
+module VerifyProbe
+  def self.call(**)
+    :done
+  end
+end
+
 case ARGV.first
 when "sound"
   ChangeRequests.operations.define("orders.pay") do |op|
     op.version = "2026-09-12"
-    op.service = "ChangeRequests::Operation" # answers .new, and that is all verify! asks
-    op.method_name = :new
+    op.service = "VerifyProbe"
     op.workflow { |w| w.stage :approval, permissions: %w(owner), threshold: 2 }
   end
 when "unsound"
