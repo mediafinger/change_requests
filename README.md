@@ -53,6 +53,10 @@ external API can pass on as that API's own idempotency key.
 resolves, and that it answers the singleton method dispatch will call. Idempotence it cannot check, and
 does not try.
 
+[docs/05_execution_and_idempotency.md](docs/05_execution_and_idempotency.md) covers the rest: how an
+execution is claimed and settled, inline against background mode, and the two maintenance tasks that
+belong on a crontab.
+
 ## Architecture
 
 The decisions behind the gem's shape — and what each one costs — are recorded as ADRs in
