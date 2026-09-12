@@ -5,9 +5,9 @@ module ChangeRequests
   # workflow it materialises (§6.4). Declaring this is what buys the dispatch allowlist, the
   # snapshot-on-create and the policy-not-caller-input guarantee of §6.12.
   #
-  # `op.override` arrives with M3a-5, `op.cooldown` with M9b.
+  # `op.cooldown` arrives with M9b.
   class Operation
-    attr_reader :key
+    attr_reader :key, :override_policy
     attr_accessor :version, :service, :payload_labels
     attr_writer :method_name, :max_attempts
 
@@ -18,7 +18,8 @@ module ChangeRequests
       @max_attempts   = nil
       @expires_in     = nil
       @expires_in_set = false
-      @workflow       = Workflow.new
+      @override_policy = nil
+      @workflow = Workflow.new
     end
 
     def method_name
@@ -56,6 +57,19 @@ module ChangeRequests
       @workflow = Workflow::Builder.build(operation_key: key, &block)
     end
 
+    # §6.10's break-glass opt-in. Declared, never defaulted: no override exists until a host
+    # writes this line. The reader is `override_policy` rather than this method - with no block to
+    # disambiguate, one name cannot both declare and report, and a bare `op.override` that read
+    # instead of declaring would silently leave the gate shut.
+    def override(permissions: nil, require_reason: false)
+      @override_policy = Override.new(permissions: list(permissions).map(&:to_s),
+                                      require_reason: require_reason ? true : false)
+    end
+
+    def overridable?
+      !override_policy.nil?
+    end
+
     def validate!
       problems = self.problems
 
@@ -88,6 +102,13 @@ module ChangeRequests
 
       "op.version is #{version.inspect}. Every operation declares one, it is snapshotted onto " \
         "every request as a NOT NULL column, and the gem never judges its content (§5.10)."
+    end
+
+    # Array() would splat a Struct or a Hash into its members. Only a real array is one.
+    def list(value)
+      return [] if value.nil?
+
+      Array.try_convert(value) || [value]
     end
 
     def service_problem

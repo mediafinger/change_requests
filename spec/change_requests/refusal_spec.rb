@@ -61,10 +61,10 @@ RSpec.describe ChangeRequests::Refusal do
       expect(errors.keys - reasons - error_keys).to be_empty
     end
 
-    # Guards return them; Commands::Create, Reject, Comment and Cancel raise the argument ones
-    # directly. M3a adds the two §8.1 keys that have no raiser yet.
-    it "is raised somewhere in lib/, or is one of the two M3a is holding" do
-      pending_m3a = %w(quorum_not_met override_not_permitted transition_error)
+    # Guards return them; Commands::Create, Reject, Comment, Cancel and ClaimExecution raise the
+    # argument ones directly. M3a-5 took :override_not_permitted off this list.
+    it "is raised somewhere in lib/, or is one of the two still held back" do
+      pending_m3a = %w(quorum_not_met transition_error)
       source = Dir[File.expand_path("../../lib/**/*.rb", __dir__)].map { |f| File.read(f) }.join
 
       unraised = (reasons + error_keys).uniq.reject do |name|

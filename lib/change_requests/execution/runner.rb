@@ -14,17 +14,20 @@ module ChangeRequests
     #
     # `Commands::Execute` is the host-facing entry point (M3a-3); this is the machinery.
     class Runner
-      def self.call(request:, actor:)
-        new(request: request, actor: actor).call
+      def self.call(request:, actor:, override: false, reason: nil)
+        new(request: request, actor: actor, override: override, reason: reason).call
       end
 
-      def initialize(request:, actor:)
-        @request = request
-        @actor   = actor
+      def initialize(request:, actor:, override: false, reason: nil)
+        @request  = request
+        @actor    = actor
+        @override = override
+        @reason   = reason
       end
 
       def call
-        attempt = Commands::ClaimExecution.call(request: request, actor: actor)
+        attempt = Commands::ClaimExecution.call(request: request, actor: actor,
+                                                override: override, reason: reason)
 
         begin
           invoke
@@ -42,7 +45,7 @@ module ChangeRequests
 
       private
 
-      attr_reader :request, :actor
+      attr_reader :request, :actor, :override, :reason
 
       def invoke
         Dispatcher.call(operation_key: request.operation_key, payload: request.payload,

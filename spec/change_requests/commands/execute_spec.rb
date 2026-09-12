@@ -195,33 +195,4 @@ RSpec.describe ChangeRequests::Commands::Execute do
       expect(command.around_perform { :ran }).to eq(:ran)
     end
   end
-
-  # §8.1's two parameters, accepted now and read by M3a-5's override branch. Until then an override
-  # is NOT honoured: `override: true` on an approved request executes it normally, and on one
-  # lacking its approvals it is refused like any other.
-  describe "§8.1's parameters, accepted and not yet read" do
-    it "accepts override: and reason: without changing the normal path" do
-      approve!
-
-      expect { described_class.call(request: change_request, actor: executer, override: true) }
-        .not_to raise_error
-      expect(change_request.reload.status).to eq("successful")
-    end
-
-    it "keeps them for the override branch to read" do
-      command = described_class.new(request: change_request, actor: executer,
-                                    override: true, reason: "provider outage")
-
-      expect(command.options).to eq(override: true, reason: "provider outage")
-    end
-
-    # The gap M3a-5 closes: an unapproved request is refused, so nothing executes without its
-    # approvals - but the refusal is the ordinary one, and no `overridden` event is emitted.
-    it "does not yet let an override past the approvals it lacks" do
-      expect { described_class.call(request: change_request, actor: executer, override: true) }
-        .to raise_error(ChangeRequests::NotExecutable) { |error|
-          expect(error.reason).to eq(:not_approved)
-        }
-    end
-  end
 end

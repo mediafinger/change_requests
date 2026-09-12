@@ -12,14 +12,17 @@ module ChangeRequests
     # invocation. `Guards::Execute` runs inside T1, against the row it locked - a guard call out
     # here would read an unlocked row and could disagree with the claim that follows it.
     #
-    # `override:` and `reason:` are §8.1's, accepted here and read by M3a-5's override branch.
+    # `override: true` takes §8.1's branch: a different guard question, a claim from `pending`,
+    # `overridden_at`, and an `overridden` event carrying the shortfall. `Commands::Override` is
+    # the named entry point a host calls for it (Q7).
     class Execute < Base
       def self.call(request:, actor:, override: false, reason: nil)
         new(request: request, actor: actor, override: override, reason: reason).call
       end
 
       def perform
-        Execution::Runner.call(request: request, actor: actor)
+        Execution::Runner.call(request: request, actor: actor,
+                               override: options[:override], reason: options[:reason])
       end
 
       # Base locks around `perform`; §8 forbids holding one across T2. Create overrides this too,

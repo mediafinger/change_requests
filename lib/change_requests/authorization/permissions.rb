@@ -8,6 +8,15 @@ module ChangeRequests
     # `Request.awaiting_approval_from`, so "the button is enabled" and "it appears in my inbox"
     # cannot drift apart.
     class Permissions
+      # Through the actor type's own lambda, never through a method on the actor: User and Admin may
+      # derive their permissions completely differently and still be compared against one
+      # definition (§9.2). Also read by Guards::Execute's override branch, which has no quorum.
+      def self.held_by(actor, type)
+        return [] if type.nil? || type.permissions.nil?
+
+        Array(type.permissions.call(actor)).map(&:to_s)
+      end
+
       # `action` is ignored here - eligibility is the same question whichever command asks it. It
       # exists because Authorization::Callable hands it on to the host's own policy.
       def allows?(actor:, quorum:, action: :approve) # rubocop:disable Lint/UnusedMethodArgument
@@ -61,13 +70,8 @@ module ChangeRequests
           (row.actor_type.nil? || row.actor_type == actor.class.name)
       end
 
-      # Through the actor type's own lambda, never through a method on the actor: User and Admin may
-      # derive their permissions completely differently and still be compared against one stage
-      # definition (§9.2).
       def permissions_of(actor, type)
-        return [] if type.permissions.nil?
-
-        Array(type.permissions.call(actor)).map(&:to_s)
+        self.class.held_by(actor, type)
       end
     end
   end
