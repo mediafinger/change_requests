@@ -16,6 +16,7 @@ RSpec.describe "the packaged gem" do
       config/routes.rb
       lib/change_requests
       lib/generators
+      lib/tasks
     ).freeze
   end
 

@@ -16,12 +16,20 @@ module Subprocess
     run_ruby(path)
   end
 
-  def run_ruby(*arguments)
-    output = IO.popen(["ruby", "-Ilib", *arguments], err: %i(child out), &:read)
+  def run_ruby(*)
+    output, status = ruby_status(*)
 
-    fail "probe exited #{$CHILD_STATUS.exitstatus}:\n#{output}" unless $CHILD_STATUS.success?
+    fail "probe exited #{status}:\n#{output}" unless status.zero?
 
     output
+  end
+
+  # For probes whose exit status is the assertion - a rake task that must fail on an unsound
+  # registry proves nothing if a non-zero exit raises here instead.
+  def ruby_status(*arguments)
+    output = IO.popen(["ruby", "-Ilib", *arguments], err: %i(child out), &:read)
+
+    [output, $CHILD_STATUS.exitstatus]
   end
 end
 
