@@ -13,7 +13,7 @@ RSpec.describe ChangeRequests::Commands::Create do
     ChangeRequests.operations.define("members.update_roles") do |op|
       op.version = "2026-09-12"
       op.service = "Members::UpdateRoles"
-      op.approvals permissions: %w(member_admin), required: 2
+      op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
     end
   end
 
@@ -205,15 +205,16 @@ RSpec.describe ChangeRequests::Commands::Create do
                                         permission_match: "any", status: "pending")
     end
 
-    describe "all four §6.4 op.approvals forms (Q14, moved here from M1b-0)" do
-      def quorum_for(**approvals)
-        ChangeRequests.operations["members.update_roles"].approvals(**approvals)
+    describe "all four §6.4 single-quorum stage forms (Q14, moved here from M1b-0)" do
+      def quorum_for(**stage_options)
+        ChangeRequests.operations["members.update_roles"]
+                      .workflow { |w| w.stage(:approval, **stage_options) }
 
         change_request.stages.sole.quorums.sole
       end
 
       it "(a) permissions: two holders of a permission" do
-        quorum = quorum_for(permissions: %w(member_admin), required: 2)
+        quorum = quorum_for(permissions: %w(member_admin), threshold: 2)
 
         expect(quorum.threshold).to eq(2)
         expect(quorum.permissions.map { |row| [row.permission, row.actor_type] })
@@ -222,14 +223,14 @@ RSpec.describe ChangeRequests::Commands::Create do
       end
 
       it "(b) actor_type: one actor of a class" do
-        quorum = quorum_for(actor_type: "Admin", required: 1)
+        quorum = quorum_for(actor_type: "Admin", threshold: 1)
 
         expect(quorum.permissions.map { |row| [row.permission, row.actor_type] })
           .to eq([[nil, "Admin"]])
       end
 
       it "(c) match: one person holding both permissions" do
-        quorum = quorum_for(permissions: %w(finance compliance), match: :all, required: 1)
+        quorum = quorum_for(permissions: %w(finance compliance), match: :all, threshold: 1)
 
         expect(quorum.permission_match).to eq("all")
         expect(quorum.permissions.map(&:permission)).to contain_exactly("finance", "compliance")
@@ -239,7 +240,7 @@ RSpec.describe ChangeRequests::Commands::Create do
         cfo = Admin.create!(name: "Cleo")
         counsel = User.create!(name: "Gene", email: "gene@example.com")
 
-        quorum = quorum_for(eligible_actors: [cfo, counsel], required: 2)
+        quorum = quorum_for(eligible_actors: [cfo, counsel], threshold: 2)
 
         expect(quorum.permissions).to be_empty
         expect(quorum.eligible_actors.map { |row| [row.actor_type, row.actor_id] })
@@ -249,46 +250,23 @@ RSpec.describe ChangeRequests::Commands::Create do
       # M1b-0 keeps the actor objects as declared rather than resolving them in an initializer,
       # before the file registering the actor types has necessarily run. This is where they resolve.
       it "refuses a named approver whose class is not registered (§9.1)" do
-        ChangeRequests.operations["members.update_roles"].approvals(eligible_actors: [Object.new])
+        ChangeRequests.operations["members.update_roles"]
+                      .workflow { |w| w.stage :approval, eligible_actors: [Object.new] }
 
         expect { change_request }.to raise_error(ChangeRequests::UnknownActorType)
       end
     end
 
-    # op.workflow is M2, but the description it will produce is already a public value object, so
-    # the materialiser's multi-stage path is provable now.
     describe "a multi-stage workflow" do
       before do
-        operation = ChangeRequests.operations["members.update_roles"]
-        operation.instance_variable_set(:@workflow, ChangeRequests::Workflow.new([triage, sign_off]))
-      end
+        ChangeRequests.operations["members.update_roles"].workflow do |w|
+          w.stage(:triage) { |q| q.quorum :support, permissions: %w(support) }
 
-      let(:triage) do
-        ChangeRequests::Workflow::Stage.new(
-          name: "triage", position: 1, satisfied_by: :any_quorum,
-          quorums: [quorum(name: "support", threshold: 1, permissions: [%w(support)])]
-        )
-      end
-
-      let(:sign_off) do
-        ChangeRequests::Workflow::Stage.new(
-          name: "sign_off", position: 2, satisfied_by: :all_quorums,
-          quorums: [
-            quorum(name: "risk", position: 1, threshold: 1, match: :all,
-                   permissions: [%w(risk), %w(compliance)]),
-            quorum(name: "money", position: 2, threshold: 2, permissions: [%w(finance Admin)]),
-          ]
-        )
-      end
-
-      def quorum(name:, threshold:, permissions:, position: 1, match: nil)
-        ChangeRequests::Workflow::Quorum.new(
-          name: name, position: position, threshold: threshold, permission_match: match,
-          permissions: permissions.map do |permission, actor_type|
-            ChangeRequests::Workflow::Permission.new(permission: permission, actor_type: actor_type)
-          end,
-          eligible_actors: []
-        )
+          w.stage :sign_off, satisfied_by: :all_quorums do |q|
+            q.quorum :risk,  permissions: %w(risk compliance), match: :all, threshold: 1
+            q.quorum :money, permissions: %w(finance), actor_type: "Admin", threshold: 2
+          end
+        end
       end
 
       it "writes the stages in order" do
@@ -332,7 +310,8 @@ RSpec.describe ChangeRequests::Commands::Create do
     describe "the snapshot is frozen at creation" do
       it "is unchanged when the declaration's threshold is edited afterwards" do
         change_request
-        ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(auditor), required: 9)
+        ChangeRequests.operations["members.update_roles"]
+                      .workflow { |w| w.stage :approval, permissions: %w(auditor), threshold: 9 }
 
         expect(change_request.reload.stages.sole.quorums.sole.threshold).to eq(2)
       end
@@ -354,7 +333,8 @@ RSpec.describe ChangeRequests::Commands::Create do
     end
 
     it "writes the whole graph in one transaction, or none of it" do
-      ChangeRequests.operations["members.update_roles"].approvals(eligible_actors: [Object.new])
+      ChangeRequests.operations["members.update_roles"]
+                    .workflow { |w| w.stage :approval, eligible_actors: [Object.new] }
 
       expect { change_request }.to raise_error(ChangeRequests::UnknownActorType)
       expect(ChangeRequests::Request.count).to eq(0)

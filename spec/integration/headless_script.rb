@@ -72,7 +72,7 @@ report :tables, GemSchema.tables.size
 ChangeRequests.operations.define "members.update_roles" do |op|
   op.version = "2026-09-11"
   op.service = "Members::UpdateRoles"
-  op.approvals permissions: %w(owner), required: 2
+  op.workflow { |w| w.stage :approval, permissions: %w(owner), threshold: 2 }
 end
 
 requester = HeadlessActor.new("act-1", "Ada Lovelace", %w(editor))

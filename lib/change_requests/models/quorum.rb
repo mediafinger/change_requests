@@ -42,7 +42,7 @@ module ChangeRequests
     validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 1 },
                          uniqueness: { scope: :change_request_stage_id }
 
-    # Null when the stage holds exactly one quorum - the `op.approvals` shorthand - because "which
+    # Null when the stage holds exactly one quorum - `w.stage` without a block - because "which
     # quorum" is then not a meaningful question (§5.9).
     validates :name, format: { with: NAME_FORMAT }, allow_nil: true
     validates :name, uniqueness: { scope: :change_request_stage_id }, allow_nil: true

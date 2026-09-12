@@ -15,7 +15,7 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
     ChangeRequests.operations.define("members.update_roles") do |op|
       op.version = "2026-09-12"
       op.service = "Members::UpdateRoles"
-      op.approvals permissions: %w(member_admin), required: 2
+      op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
     end
 
     ChangeRequests::Commands::Approve.call(request: change_request, actor: actor)
@@ -41,7 +41,8 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
     # A third approval would meet the threshold of 2 and close the stage, so this uses a workflow
     # that still has room - the point is whose row goes, not what the evaluation then does.
     it "leaves other approvers' rows alone" do
-      ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(member_admin), required: 3)
+      ChangeRequests.operations["members.update_roles"]
+                    .workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 3 }
       spacious = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles",
                                                        requester: requester)
       other = Admin.create!(name: "Ben", roles: %w(member_admin))
@@ -189,7 +190,8 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
     end
 
     it "puts a quorum that lost its threshold back to pending" do
-      ChangeRequests.operations["members.update_roles"].approvals(permissions: %w(member_admin), required: 1)
+      ChangeRequests.operations["members.update_roles"]
+                    .workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 1 }
       request = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles",
                                                       requester: requester)
       quorum = request.stages.sole.quorums.sole

@@ -76,31 +76,32 @@ RSpec.describe ChangeRequests::Refusal do
   end
 
   describe "the stage and quorum namespaces (§5.9)" do
-    it "names the one stage the gem itself creates" do
-      expect(translations.dig("stages", ChangeRequests::Operation::DEFAULT_STAGE_NAME))
-        .to eq("Approval")
+    # The host names every stage - `op.workflow` invents none - so the gem has no name to translate
+    # and ships neither namespace. Both are comment blocks showing a host how to add their own.
+    it "ships no stage or quorum names of its own" do
+      expect(translations.keys).to eq(%w(errors))
     end
 
-    it "is what Stage#label reads" do
+    it "humanizes every stage name, there being no entry to prefer" do
       change_request = build_request
-      stage = build_stage(change_request, name: "approval")
 
-      expect(stage.label).to eq("Approval")
+      expect(build_stage(change_request, name: "sign_off").label).to eq("Sign off")
     end
 
-    # A host declares its own names; anything unlisted humanizes, so a locale entry is optional.
-    it "leaves an undeclared name to humanize" do
+    it "reads a name a host does translate" do
       change_request = build_request
       stage = build_stage(change_request, name: "sign_off")
 
-      expect(stage.label).to eq("Sign off")
+      with_translations("change_requests.stages.sign_off" => "Director sign-off")
+
+      expect(stage.label).to eq("Director sign-off")
     end
 
     it "leaves a nameless quorum to borrow its stage's label (§5.9)" do
       change_request = build_request
-      stage = build_stage(change_request, name: "approval")
+      stage = build_stage(change_request, name: "operational")
 
-      expect(build_quorum(stage, name: nil).label).to eq("Approval")
+      expect(build_quorum(stage, name: nil).label).to eq("Operational")
     end
   end
 

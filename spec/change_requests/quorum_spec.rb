@@ -98,7 +98,7 @@ RSpec.describe ChangeRequests::Quorum do
       expect(stage.quorums.build(position: 2, threshold: 1, name: "Risk Team")).not_to be_valid
     end
 
-    # Null for the `op.approvals` shorthand, where "which quorum" is not a meaningful question.
+    # Null for a `w.stage` without a block, where "which quorum" is not a meaningful question.
     it "may be absent" do
       expect(stage.quorums.build(position: 2, threshold: 1, name: nil)).to be_valid
     end

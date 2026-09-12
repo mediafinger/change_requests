@@ -42,14 +42,12 @@ en:
       quorum_not_met: "This request does not have the approvals it needs."
       transition_error: "This request will not accept that."
 
-    # Stage and quorum names are declaration identifiers, not display text (§5.9). A host adds a key
-    # per name it declares; anything unlisted falls back to `name.humanize`, so "sign_off" reads as
-    # "Sign off" with no locale entry at all.
+    # Stage and quorum names are declaration identifiers, not display text (§5.9). The host names
+    # every stage, so the gem ships no entry here at all: a host adds a key per name it declares,
+    # and anything unlisted falls back to `name.humanize` - "sign_off" reads as "Sign off" with no
+    # locale entry.
     #
     #   stages:
     #     sign_off: "Director sign-off"
     #   quorums:
     #     owners: "Owners"
-    stages:
-      # The only name the gem itself creates - `op.approvals` builds one stage called this.
-      approval: "Approval"

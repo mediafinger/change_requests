@@ -15,7 +15,7 @@ RSpec.describe ChangeRequests::Commands::Expire do
       op.version    = "2026-09-12"
       op.service    = "Members::UpdateRoles"
       op.expires_in = 7.days
-      op.approvals permissions: %w(member_admin), required: 2
+      op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
     end
 
     change_request.update_columns(expires_at: 1.minute.ago)
