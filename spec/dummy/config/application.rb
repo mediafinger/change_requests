@@ -43,6 +43,14 @@ ChangeRequests.configure do |config|
     type.permissions = ->(manager) { manager.roles }
   end
 
+  # §6.9's workflows gate a stage on an actor class. Same key type as Admin deliberately - the
+  # three-key-type point is made elsewhere, and this class exists to be gated on.
+  config.actor_type "Director" do |type|
+    type.key_type    = :integer
+    type.label       = ->(director) { director.name }
+    type.permissions = ->(director) { director.roles }
+  end
+
   config.tenant_type "Organization" do |type|
     type.key_type = :uuid
     type.label    = ->(organization) { organization.name }
