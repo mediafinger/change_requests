@@ -52,6 +52,28 @@ class LockedRunner < ChangeRequests::Execution::Runner
   end
 end
 
+# The teeth for M3a-4: a count, not a timing window. A Mutex rather than a bare `+= 1`, because a
+# lost update would make a double execution look like a single one - which is the bug being hunted.
+class CountingTarget
+  MUTEX = Mutex.new
+
+  class << self
+    attr_accessor :count
+
+    def call(**)
+      MUTEX.synchronize { self.count = count.to_i + 1 }
+
+      :done
+    end
+  end
+end
+
+class FailingTarget
+  def self.call(**)
+    fail("the provider said no")
+  end
+end
+
 # rubocop:disable-next RSpec/DescribeClass
 RSpec.describe "concurrency", :concurrent do
   self.use_transactional_tests = false
@@ -339,6 +361,179 @@ RSpec.describe "concurrency", :concurrent do
       worker.join
 
       expect(reload.status).to eq("successful")
+    end
+  end
+
+  # 6-8. §15.3's execution races. Every one asserts the same thing first - the target ran exactly
+  # once - because that is the only claim that is deterministic and the only one that matters.
+  describe "execution races (§8, §15.3)" do
+    let(:executer) { Manager.create!(id: "mgr-1", name: "Olive", roles: %w(ops)) }
+
+    before do
+      CountingTarget.count = 0
+
+      ChangeRequests.operations["members.update_roles"].service = "CountingTarget"
+
+      ChangeRequests::Commands::Approve.call(request: change_request, actor: approver("Ada"))
+      ChangeRequests::Commands::Approve.call(request: change_request, actor: approver("Ben"))
+
+      # Touched before any thread exists, like every other row here.
+      executer
+    end
+
+    def execute_in_parallel(count = 2)
+      ChangeRequests::Testing.in_parallel(count) do
+        ChangeRequests::Commands::Execute.call(request: reload, actor: executer)
+      end
+    end
+
+    def refusals(outcomes)
+      outcomes.grep(ChangeRequests::Error)
+    end
+
+    # 6. Two processes executing the same approved request.
+    describe "two processes executing the same approved request" do
+      it "invokes the target exactly once" do
+        execute_in_parallel
+
+        expect(CountingTarget.count).to eq(1)
+      end
+
+      it "writes one attempt, not two - the claim is what the ceiling counts (§5.6)" do
+        execute_in_parallel
+
+        expect(reload.attempts.count).to eq(1)
+        expect(reload.status).to eq("successful")
+      end
+
+      # Exactly one loser, refused. *Which* refusal depends on how far the winner got before the
+      # loser took the lock - mid-flight is :executing, finished is :already_finalized - and
+      # asserting one of them would be a spec that fails the build on a slow morning (Q50).
+      it "refuses exactly one of them, and tells it something true" do
+        outcomes = execute_in_parallel
+
+        expect(refusals(outcomes).size).to eq(1)
+        expect(refusals(outcomes).first).to be_a(ChangeRequests::NotExecutable)
+        expect(refusals(outcomes).first.reason).to be_in(%i(executing already_finalized))
+      end
+
+      it "emits one execution_started, so the timeline does not claim two runs" do
+        execute_in_parallel
+
+        expect(reload.events.where(kind: "execution_started").count).to eq(1)
+      end
+    end
+
+    # 7. A retry racing the attempt ceiling. Its own request and its own operation: max_attempts
+    # is readonly after create, so a ceiling above the default has to be declared before the row
+    # exists - which is how a host sets one anyway.
+    describe "a retry racing the attempt ceiling" do
+      let(:retryable) do
+        ChangeRequests.operations.define("orders.pay") do |op|
+          op.version      = "2026-09-12"
+          op.service      = "FailingTarget"
+          op.max_attempts = 2
+          op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 1 }
+        end
+
+        ChangeRequests::Commands::Create.call(operation_key: "orders.pay", requester: requester)
+      end
+
+      before do
+        ChangeRequests::Commands::Approve.call(request: retryable, actor: approver("Cara"))
+
+        spend_first_attempt!
+
+        ChangeRequests.operations["orders.pay"].service = "CountingTarget"
+      end
+
+      def reload_retryable
+        ChangeRequests::Request.find(retryable.id)
+      end
+
+      # Attempt one, spent on a target that raises: the request is left `failed` and retryable.
+      # Not an expectation - this is setup, and it says so by failing with its own message.
+      def spend_first_attempt!
+        ChangeRequests::Commands::Execute.call(request: reload_retryable, actor: executer)
+
+        fail "FailingTarget did not raise, so attempt one was not spent"
+      rescue ChangeRequests::TargetFailed
+        nil
+      end
+
+      def retry_in_parallel
+        ChangeRequests::Testing.in_parallel(2) do
+          ChangeRequests::Commands::Execute.call(request: reload_retryable, actor: executer)
+        end
+      end
+
+      it "never exceeds max_attempts, whichever thread claims the last one (§8)" do
+        retry_in_parallel
+
+        expect(reload_retryable.attempts.count).to eq(2)
+        expect(reload_retryable.attempts.count).to eq(reload_retryable.max_attempts)
+      end
+
+      it "invokes the target exactly once more" do
+        retry_in_parallel
+
+        expect(CountingTarget.count).to eq(1)
+      end
+
+      it "refuses the loser, the ceiling leaving room for only one of them" do
+        outcomes = retry_in_parallel
+
+        expect(refusals(outcomes).size).to eq(1)
+        expect(reload_retryable.status).to eq("successful")
+      end
+
+      it "refuses both once the ceiling is spent, invoking nothing further" do
+        retry_in_parallel
+
+        outcomes = retry_in_parallel
+
+        expect(refusals(outcomes).size).to eq(2)
+        expect(CountingTarget.count).to eq(1)
+      end
+    end
+
+    # 8. Execute racing Cancel. The invariant is that a canceled request never carries a committed
+    # side effect, and a successful one never follows a committed cancellation.
+    describe "execute racing cancel" do
+      def race_cancel
+        ChangeRequests::Testing.in_parallel(2) do |index|
+          if index.zero?
+            ChangeRequests::Commands::Execute.call(request: reload, actor: executer)
+          else
+            ChangeRequests::Commands::Cancel.call(request: reload, actor: requester,
+                                                  reason: "no longer needed")
+          end
+        end
+      end
+
+      it "ends in one of the two outcomes and never a mixture of both" do
+        race_cancel
+
+        expect(reload.status).to be_in(%w(successful canceled))
+      end
+
+      it "leaves no side effect behind a cancellation, and no cancellation after one" do
+        race_cancel
+
+        if reload.canceled?
+          expect(CountingTarget.count).to eq(0)
+          expect(reload.attempts).to be_empty
+        else
+          expect(CountingTarget.count).to eq(1)
+          expect(reload.events.where(kind: "canceled")).to be_empty
+        end
+      end
+
+      it "refuses exactly one of the two, whichever lost" do
+        outcomes = race_cancel
+
+        expect(refusals(outcomes).size).to eq(1)
+      end
     end
   end
 end
