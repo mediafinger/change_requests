@@ -161,32 +161,40 @@ RSpec.describe ChangeRequests::Commands::Create do
       expect { change_request }.to raise_error(ChangeRequests::UnknownOperation, /members\.update_roles/)
     end
 
-    # An approval gate with no approvers is a misconfiguration, and a request that can never leave
-    # `pending` is worse than a loud failure at the call site. M2's verify! catches it at boot.
-    it "refuses a declaration with no approvals at all" do
-      ChangeRequests.operations.define("orders.refund") do |op|
-        op.version = "1"
-        op.service = "Orders::Refund"
-      end
-
-      expect { described_class.call(operation_key: "orders.refund", requester: requester) }
-        .to raise_error(ChangeRequests::ConfigurationError, /orders\.refund.*approvals/m)
-    end
-
+    # M2-3 moved these onto Operation#problems, which `validate!` reads too - so an incomplete
+    # declaration never reaches the registry, and this is the backstop for one edited afterwards.
     it "refuses a declaration with no dispatch target, rather than failing a NOT NULL" do
       ChangeRequests.operations["members.update_roles"].service = nil
 
       expect { change_request }.to raise_error(ChangeRequests::ConfigurationError, /service/)
     end
 
+    it "refuses a declaration whose approvals were taken away after it was declared" do
+      operation = ChangeRequests.operations["members.update_roles"]
+      operation.instance_variable_set(:@workflow, ChangeRequests::Workflow.new)
+
+      expect { change_request }.to raise_error(ChangeRequests::ConfigurationError, /approvals/)
+    end
+
     # One call should fix one round of mistakes, not one mistake per call.
     it "reports both problems at once" do
-      ChangeRequests.operations.define("orders.refund") { |op| op.version = "1" }
+      operation = ChangeRequests.operations["members.update_roles"]
+      operation.service = nil
+      operation.version = nil
 
-      expect { described_class.call(operation_key: "orders.refund", requester: requester) }
-        .to raise_error(ChangeRequests::ConfigurationError) { |error|
-          expect(error.message.lines.grep(/^- /).size).to eq(2)
-        }
+      expect { change_request }.to raise_error(ChangeRequests::ConfigurationError) { |error|
+        expect(error.message.lines.grep(/^- /).size).to eq(2)
+      }
+    end
+
+    # Both readers word a problem identically, because both read Operation#problems.
+    it "refuses in the same words verify! does" do
+      operation = ChangeRequests.operations["members.update_roles"]
+      operation.service = nil
+
+      expect { change_request }.to raise_error(ChangeRequests::ConfigurationError) { |error|
+        expect(error.message).to include(operation.problems.sole)
+      }
     end
   end
 

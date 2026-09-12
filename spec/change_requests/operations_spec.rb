@@ -8,6 +8,7 @@ RSpec.describe ChangeRequests::Operations do
       op.version     = overrides.fetch(:version, "2026-09-11")
       op.service     = overrides.fetch(:service, "Members::UpdateRoles")
       op.method_name = overrides[:method_name] if overrides.key?(:method_name)
+      op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
     end
   end
 
@@ -21,7 +22,9 @@ RSpec.describe ChangeRequests::Operations do
 
       operations.define("members.update_roles") do |op|
         op.version = "2026-09-11"
-        yielded    = op
+        op.service = "Members::UpdateRoles"
+        op.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
+        yielded = op
       end
 
       expect(yielded).to be_a(ChangeRequests::Operation)
@@ -43,6 +46,13 @@ RSpec.describe ChangeRequests::Operations do
     it "validates at declaration time, so a missing version fails on boot (§5.10)" do
       expect { operations.define("members.update_roles") { |op| op.service = "X" } }
         .to raise_error(ChangeRequests::ConfigurationError, /version/)
+    end
+
+    # M2-3: the completeness checks live on Operation#problems, which validate! reads, so an
+    # operation that could never be requested cannot enter the registry either (§6.12 point 6).
+    it "refuses a declaration with no workflow, which could never be approved" do
+      expect { operations.define("members.update_roles") { |op| op.version = "1" } }
+        .to raise_error(ChangeRequests::ConfigurationError, /no approvals/)
     end
 
     it "does not register an operation it refused" do
@@ -112,7 +122,11 @@ RSpec.describe ChangeRequests::Operations do
       define "members.update_roles"
 
       copy = operations.dup
-      copy.define("orders.refund") { |op| op.version = "1" }
+      copy.define("orders.refund") do |op|
+        op.version = "1"
+        op.service = "Orders::Refund"
+        op.workflow { |w| w.stage :approval, permissions: %w(owner) }
+      end
       copy.clear
 
       expect(operations.keys).to eq(["members.update_roles"])

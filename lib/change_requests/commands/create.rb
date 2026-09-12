@@ -64,20 +64,11 @@ module ChangeRequests
         declaration
       end
 
-      # Both would otherwise surface as a NOT NULL violation or as a request that can never leave
-      # `pending`. M2's `verify!` catches them at boot; this is the backstop. Reported together,
-      # like Configuration#validate!: one call should fix one round of mistakes.
+      # The same `Operation#problems` that `verify!` reads at boot and `validate!` reads at
+      # declaration, so the three cannot disagree about what a complete declaration is (§7.2 †).
+      # This is the backstop: an operation mutated after it was declared still refuses here.
       def refuse_incomplete(declaration)
-        problems = []
-
-        if declaration.service.blank?
-          problems << "it declares no service, so nothing could ever execute it - set `op.service`"
-        end
-
-        if declaration.workflow.empty?
-          problems << "it declares no approvals, so a request could never be approved - " \
-                      "declare `op.workflow`"
-        end
+        problems = declaration.problems
 
         return if problems.empty?
 

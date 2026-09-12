@@ -59,8 +59,8 @@ RSpec.describe ChangeRequests::Operation do
   end
 
   describe "#validate!" do
-    it "passes once a version is declared" do
-      operation.version = "2026-09-11"
+    it "passes once the declaration is complete" do
+      complete!
 
       expect(operation.validate!).to be(true)
     end
@@ -75,5 +75,47 @@ RSpec.describe ChangeRequests::Operation do
 
       expect { operation.validate! }.to raise_error(ChangeRequests::ConfigurationError, /version/)
     end
+  end
+
+  # One implementation, three readers: validate! here, Commands::Create at creation and
+  # Operations#verify! at boot, so none of them can disagree (§7.2 †, §6.12 point 6).
+  describe "#problems" do
+    it "is empty for a complete declaration" do
+      complete!
+
+      expect(operation.problems).to be_empty
+    end
+
+    it "reports a missing service, which nothing could ever execute" do
+      complete!
+      operation.service = nil
+
+      expect(operation.problems.join).to include("no service")
+    end
+
+    it "reports an empty workflow, which no request could ever leave pending" do
+      operation.version = "2026-09-11"
+      operation.service = "Members::UpdateRoles"
+
+      expect(operation.problems.join).to include("no approvals")
+    end
+
+    it "reports every problem at once, not the first" do
+      expect(operation.problems.size).to eq(3)
+    end
+
+    # Resolving the constant needs the host's classes loaded, so it runs at boot and nowhere else.
+    it "says nothing about the target, which only verify! resolves" do
+      complete!
+      operation.service = "Members::NoSuchThing"
+
+      expect(operation.problems).to be_empty
+    end
+  end
+
+  def complete!
+    operation.version = "2026-09-11"
+    operation.service = "Members::UpdateRoles"
+    operation.workflow { |w| w.stage :approval, permissions: %w(member_admin), threshold: 2 }
   end
 end
