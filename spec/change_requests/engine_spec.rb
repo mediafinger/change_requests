@@ -69,6 +69,55 @@ RSpec.describe "ChangeRequests::Engine" do
     RUBY
   end
 
+  # §6.12 point 6's to_prepare hook. `initialize!` runs the prepare callbacks, so an unsound
+  # registry refuses the boot; `reloader.prepare!` runs them again, which is what a reload does.
+  def self.verifying(service, env: "development")
+    <<~RUBY
+      ENV["RAILS_ENV"] = #{env.inspect}
+
+      require "rails"
+      require "change_requests"
+      require "tmpdir"
+
+      #{registering_an_actor_type}
+
+      Object.const_set(:ReloadProbe, Class.new { def self.call(**) = :done })
+
+      ChangeRequests.operations.define("orders.pay") do |op|
+        op.version = "2026-09-12"
+        op.service = #{service.inspect}
+        op.workflow { |w| w.stage :approval, permissions: %w(owner), threshold: 2 }
+      end
+
+      app = Class.new(Rails::Application) do
+        config.eager_load      = false
+        config.root            = Dir.mktmpdir
+        config.secret_key_base = "x" * 64
+        config.logger          = Logger.new(IO::NULL)
+      end
+      Object.const_set(:ProbeApp, app)
+
+      begin
+        ProbeApp.initialize!
+        puts "boot=ok"
+      rescue ChangeRequests::ConfigurationError => e
+        puts "boot=refused"
+        puts "message=" + e.message.lines.grep(/^- /).first.to_s.strip
+      end
+
+      # What a reload does to the class verify! resolved a moment ago: replaces it.
+      Object.send(:remove_const, :ReloadProbe)
+      Object.const_set(:ReloadProbe, Class.new)
+
+      begin
+        Rails.application.reloader.prepare!
+        puts "reload=passed"
+      rescue ChangeRequests::ConfigurationError
+        puts "reload=refused"
+      end
+    RUBY
+  end
+
   context "when the host has loaded Rails" do
     subject(:probe) { ruby_probe(self.class.with_rails) }
 
@@ -118,6 +167,44 @@ RSpec.describe "ChangeRequests::Engine" do
 
     it "draws an empty route set - controllers and views are M6" do
       expect(probe).to include("routes=0")
+    end
+  end
+
+  # §6.12 point 6. Registered in the engine only, so the domain core never grows a Rails hook.
+  context "when an application boots in development with a sound registry" do
+    subject(:probe) { ruby_probe(self.class.verifying("ReloadProbe")) }
+
+    it "finishes booting" do
+      expect(probe).to include("boot=ok")
+    end
+
+    # The whole point of the hook: verify! resolves the constant every time it runs, so a class
+    # replaced by a reload is re-read rather than remembered from the last one.
+    it "re-reads the registry on every reload, holding no class across one" do
+      expect(probe).to include("reload=refused")
+    end
+  end
+
+  context "when an application boots in development with an unsound registry" do
+    subject(:probe) { ruby_probe(self.class.verifying("Orders::NoSuchThing")) }
+
+    it "refuses to finish booting, rather than failing the first request that executes" do
+      expect(probe).to include("boot=refused")
+    end
+
+    it "says which operation and what is wrong with it" do
+      expect(probe).to match(/message=- orders\.pay:.*Orders::NoSuchThing/)
+    end
+  end
+
+  # Production runs `rake change_requests:verify` instead: verify! constantizes every declared
+  # service, and a booted application should not pay for that on every request cycle.
+  context "when an application boots in production with an unsound registry" do
+    subject(:probe) { ruby_probe(self.class.verifying("Orders::NoSuchThing", env: "production")) }
+
+    it "does not verify, so the hook is a development affordance and not a gate" do
+      expect(probe).to include("boot=ok")
+      expect(probe).to include("reload=passed")
     end
   end
 

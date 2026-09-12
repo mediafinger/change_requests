@@ -83,7 +83,9 @@ module ChangeRequests
     def setup_loader
       @loader = Zeitwerk::Loader.for_gem.tap do |loader|
         # Generators go through Rails' generator lookup; the test kit is required by the host.
+        # lib/tasks holds .rake files the engine loads, not constants under a Tasks namespace.
         loader.ignore("#{__dir__}/generators")
+        loader.ignore("#{__dir__}/tasks")
         loader.ignore("#{__dir__}/change_requests/rspec.rb")
 
         # Filing convention, not a namespace: models/request.rb defines ChangeRequests::Request.
