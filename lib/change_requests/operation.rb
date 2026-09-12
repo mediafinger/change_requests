@@ -70,13 +70,14 @@ module ChangeRequests
     # `validate!` at declaration, `Commands::Create` at creation and `Operations#verify!` at boot,
     # so none of them can disagree about what a complete declaration is (§7.2 †, §6.12 point 6).
     def problems
-      [version_problem, service_problem, workflow_problem, *threshold_problems].compact
+      [version_problem, service_problem, method_name_problem, workflow_problem,
+       *threshold_problems].compact
     end
 
     # What needs the host's classes loaded, so it runs at boot and nowhere else: the constant
     # resolves, and it answers the singleton method dispatch will call (§6.12 point 6).
     def target_problems
-      return [] if service.blank?
+      return [] if service.blank? || !method_name_declared?
 
       target = service.to_s.safe_constantize
 
@@ -99,6 +100,19 @@ module ChangeRequests
       return if service.present?
 
       "it declares no service, so nothing could ever execute it - set `op.service`"
+    end
+
+    # `attr_writer :method_name` can assign the documented :call default away (§6.12). Reported
+    # here, so verify! names the declaration rather than respond_to? raising on nil.
+    def method_name_problem
+      return if method_name_declared?
+
+      "op.method_name is #{@method_name.inspect}. Dispatch calls the public singleton method of " \
+        "that name, and it defaults to :call - assigning nil takes the default away (§6.12)."
+    end
+
+    def method_name_declared?
+      method_name.to_s.strip.present?
     end
 
     def workflow_problem

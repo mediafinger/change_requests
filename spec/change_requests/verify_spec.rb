@@ -105,6 +105,20 @@ RSpec.describe "ChangeRequests.operations.verify! (§6.12 point 6)" do
       expect(operations.problems.join).to include(".perform")
     end
 
+    # Regression: target_problems called `respond_to?(nil)`, which raises TypeError - so verify!
+    # crashed on the one problem it exists to report.
+    it "reports a method_name assigned away rather than raising TypeError" do
+      define.method_name = nil
+
+      expect(operations.problems.join).to include("op.method_name")
+    end
+
+    it "says nothing about the target when the method_name is gone, problems having said it" do
+      define.method_name = nil
+
+      expect(operations.problems.grep(/does not answer/)).to be_empty
+    end
+
     # A service that is missing entirely is already reported by the completeness check; saying
     # "NilClass does not resolve" on top of it would be noise.
     it "says nothing about the target when no service is declared at all" do
