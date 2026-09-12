@@ -28,6 +28,31 @@ gem install change_requests
 
 TODO: Write usage instructions here
 
+## The target contract
+
+The gem asks one thing of the code it executes on your behalf. A change-request target is a **public
+singleton method** that accepts **keyword arguments only**, and whose effect is **idempotent**: running it
+twice with the same payload must leave the same result as running it once.
+
+```ruby
+class Members::UpdateRoles
+  def self.call(member_id:, roles:, change_request_id: nil)
+    Member.find(member_id).update!(roles: roles)
+  end
+end
+```
+
+There is no flag to declare otherwise. A failed request keeps its approval and is retried up to
+`op.max_attempts`, so a target that cannot meet the requirement must leave that at `1` — the retry ceiling
+is what bounds a repeated effect, and it is the only bound the gem can actually enforce.
+
+A target that declares `change_request_id:` receives it, stable across every attempt, which one calling an
+external API can pass on as that API's own idempotency key.
+
+`rake change_requests:verify` checks the half of this that is checkable: that every declared service
+resolves, and that it answers the singleton method dispatch will call. Idempotence it cannot check, and
+does not try.
+
 ## Architecture
 
 The decisions behind the gem's shape — and what each one costs — are recorded as ADRs in

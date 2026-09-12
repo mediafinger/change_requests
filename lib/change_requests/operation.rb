@@ -5,16 +5,15 @@ module ChangeRequests
   # workflow it materialises (§6.4). Declaring this is what buys the dispatch allowlist, the
   # snapshot-on-create and the policy-not-caller-input guarantee of §6.12.
   #
-  # M2 adds `op.cooldown`, `op.override` and `Operations#verify!`.
+  # `op.override` arrives with M3a-5, `op.cooldown` with M9b.
   class Operation
     attr_reader :key
-    attr_accessor :version, :service, :payload_labels, :idempotent
+    attr_accessor :version, :service, :payload_labels
     attr_writer :method_name, :max_attempts
 
     def initialize(key)
       @key            = key.to_s
       @method_name    = :call
-      @idempotent     = false
       @payload_labels = nil
       @max_attempts   = nil
       @expires_in     = nil

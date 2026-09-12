@@ -18,10 +18,6 @@ RSpec.describe ChangeRequests::Operation do
       expect(operation.method_name).to eq(:perform)
     end
 
-    it "is not idempotent unless the declaration says so (§8)" do
-      expect(operation.idempotent).to be(false)
-    end
-
     it "starts with no workflow at all, so an operation must declare who approves it" do
       expect(operation.workflow).to be_empty
     end
