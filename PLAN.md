@@ -118,12 +118,14 @@ change_requests/
 │       │   └── attempt.rb
 │       ├── operations.rb                     # the collection: define, [], keys, verify!
 │       ├── operation.rb                      # one entry
-│       ├── operation/workflow.rb             # stage + quorum definitions
+│       ├── workflow.rb                       # the description op.workflow builds - stages + quorums
 │       ├── guards/                            # allowed? + reason, shared by commands AND presenters
 │       │   ├── base.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
 │       │   └── (no create.rb - Create has no request to guard; see §7.2)
 │       ├── commands/                          # guard + mutate + emit event, inside with_lock
 │       │   ├── base.rb create.rb approve.rb unapprove.rb reject.rb execute.rb cancel.rb comment.rb expire.rb
+│       │   ├── override.rb                   # Execute with override: true, named so it reads as one - §8.1
+│       │   ├── cancel_undeclared.rb          # Cancel, emitting operation_undeclared instead - §5.11
 │       │   └── evaluate_workflow.rb          # advance the workflow after a decision - §7.1
 │       ├── authorization/
 │       │   ├── permissions.rb                 # default: set inclusion
@@ -430,6 +432,13 @@ Under `all_quorums`, an approval links to **exactly one** quorum - the lowest-`p
 qualifies for. If Edith holds both `admin` and `owner`, her single approval cannot close both: "1 Admin and
 2 Owners" means three people. Under `any_quorum` an approval links to every quorum it matches, since
 satisfying any one of them ends the stage.
+
+> **Not implemented as of 0.2.x.** `Guards::Approve#countable_quorums` returns every eligible quorum in both
+> modes, so Edith's single approval currently links to both and closes the stage alone - the exact outcome
+> this rule exists to prevent. M1b shipped the `all_quorums` *satisfaction* rule and left the *linking* rule
+> to M9a, which closes the half that was checked and leaves the half that was not. Nothing reaches it today:
+> the only shipped declaration syntax describes one stage holding one quorum, so nothing can build a
+> multi-quorum stage. **It stops being unreachable at M2**, which ships `op.workflow` - see §17.1.
 
 > The enforcement key is `(approver_type, approver_id)`, so this is airtight **within** an actor class. Across
 classes the gem cannot know that `Admin#7` and `User#99` are the same human - two records, two deliberate
@@ -770,7 +779,7 @@ change_requests.quorums.<name>    # "Owners"
 Missing keys fall back to `name.humanize`. `Value::StageProgress` and `Value::Quorum` expose `name` and
 `label` as distinct attributes; views render `label`.
 
-A quorum `name` is null when its stage holds exactly one quorum - the `op.approvals` shorthand - because
+A quorum `name` is null when its stage holds exactly one quorum - `w.stage` without a block (§6.4) - because
 "which quorum" is then not a meaningful question. The presenter falls back to the stage's label, and event
 metadata omits the `quorum` key entirely.
 
@@ -795,18 +804,30 @@ The README recommends two conventions:
 A request whose `operation_key` is no longer declared (meaning: someone changed or removed the `ChangeRequests.operation`) can never execute - dispatch resolves the operation
 live, and the allowlist refuses. Such a request is not partially workable, it is finished:
 
-- **Every guard refuses, except `Comment`.** Approve, unapprove, reject, execute and override all fail with
-  `ChangeRequests::UnknownOperation`. Approving something that can never run wastes approver attention and
-  writes a misleading audit record. **Commenting stays open**: a request stranded by a removed declaration is
-  exactly the one someone needs to leave a note on, and a comment writes no lifecycle state (§5.5). The
-  `commented` event records the request's creation-time `operation_version`, there being no live one to read.
+- **Every guard refuses, except `Comment` and `Cancel`.** Approve, unapprove, reject, execute and override
+  all fail with `ChangeRequests::UnknownOperation`. Approving something that can never run wastes approver
+  attention and writes a misleading audit record.
+  - **Commenting stays open**: a request stranded by a removed declaration is exactly the one someone needs
+    to leave a note on, and a comment writes no lifecycle state (§5.5). The `commented` event records the
+    request's creation-time `operation_version`, there being no live one to read.
+  - **Cancelling stays open, and to anyone.** The usual requester-or-approver rule is dropped along with
+    the refusal: a request that can never run is not worth adjudicating who may tidy it away, and leaving
+    it clearable only by a rake task means a stranded row sits in the table until an operator notices.
+    `Guards::Cancel` still refuses a request that is already final or mid-execution - being undeclared does
+    not make it recallable.
 - **It is invisible as open work.** `visible_to`, `awaiting_approval_from` and the default index scope all
   exclude requests with no live declaration, so it leaves inboxes and badges immediately, before any
   cleanup runs.
-- **`Maintenance.cancel_undeclared!` closes it out**, setting `canceled` with a system actor and emitting
-  `operation_undeclared` carrying the operation key and the request's creation-time version.
+- **`Maintenance.cancel_undeclared!` closes them out in bulk**, setting `canceled` with a system actor and
+  emitting `operation_undeclared` carrying the operation key and the request's creation-time version.
 
-The cancellation ships as a rake task rather than an automatic sweeper. `canceled` is final, and a missing
+**Which event is emitted says who did it.** A person cancelling a stranded request emits `canceled`, with
+their own reason, exactly as any other cancellation - they cancelled it, and the trail should say so. The
+sweeper emits `operation_undeclared`, because "nobody decided this; its declaration vanished" is a
+different fact and a timeline should not have to infer it from the actor column. `Commands::CancelUndeclared`
+is what the sweeper calls; its reason is translatable rather than a hardcoded sentence.
+
+The bulk cancellation ships as a rake task rather than an automatic sweeper. `canceled` is final, and a missing
 declaration is as likely to be a deploy accident - an initializer not loaded, a file renamed - as a
 deliberate removal. Refusal and invisibility are immediate and reversible, cancelling all the open change_requests of the removed operation means running the `rake task` to cleanup. Or, if it was a mistake: revert the faulty code change and continue where you left off, without any data loss.
 
@@ -880,7 +901,7 @@ end
 ### 6.3 Write the thing that will eventually run
 
 An ordinary service object of your own. The only contract: a **public singleton method taking keyword
-arguments**, whose effect is transactional or idempotent.
+arguments**, whose effect is idempotent.
 
 ```ruby
 # app/services/members/update_roles.rb
@@ -903,27 +924,41 @@ ChangeRequests.operations.define "members.update_roles" do |op|
   op.service     = "Members::UpdateRoles"
   op.method_name = :call
 
-  op.approvals permissions: %w(member_admin), required: 2 # who is allowed to approve and how many are necessary?
-  
+  op.workflow do |w|                           # who may approve, and how many are needed
+    w.stage :approval, permissions: %w(member_admin), threshold: 2
+  end
+
   # Labels will persist, even when the Objects are deleted, to keep a usable audit trail
   # sparse: only keys whose raw value means nothing to a human
   op.payload_labels = ->(p) { { member_id: Member.find_by(id: p[:member_id])&.name } }
 
-  op.idempotent   = true
   op.max_attempts = 3
   op.expires_in   = 7.days
   op.cooldown     = 0                          # minutes a decided stage stays reversible - §7.1
 end
 ```
 
-`op.approvals` is the shorthand for the common case - one rule, no ceremony:
+**`op.workflow` is the only way to declare who approves.** A stage with one counting rule takes its
+`permissions` and `threshold` inline; §6.9 adds the block form for stages holding more than one. There is
+no second, shorter syntax for the common case: an earlier draft had `op.approvals` beside this, both
+writing the same slot, and a declaration carrying one of each silently kept only the later one. Two
+spellings for one idea is also where `required:` drifted away from `threshold:`.
+
+The single-quorum stage covers every shape the old shorthand did:
 
 ```ruby
-op.approvals permissions: %w(member_admin), required: 2         # two holders of :member_admin
-op.approvals actor_type: "Admin", required: 1                   # one Admin (a class, not a permission)
-op.approvals permissions: %w(finance compliance), match: :all, required: 1   # one person holding both
-op.approvals eligible_actors: [cfo, general_counsel], required: 2            # only these two people
+w.stage :approval, permissions: %w(member_admin), threshold: 2        # two holders of :member_admin
+w.stage :approval, actor_type: "Admin", threshold: 1                  # one Admin (a class, not a permission)
+w.stage :approval, permissions: %w(finance compliance), match: :all, threshold: 1  # one person holding both
+w.stage :approval, eligible_actors: [cfo, general_counsel], threshold: 2           # only these two people
 ```
+
+**The stage name is the host's.** The gem invents none, so `change_requests.stages.<name>` is a key a host
+adds for its own names, and anything unlisted falls back to `name.humanize` (§5.9).
+
+**Every target must be idempotent.** There is no `op.idempotent` flag to declare otherwise - see §6.12's
+target contract. A flag would have been a promise the gem cannot check and a host cannot easily keep, and
+the retry ceiling is what actually bounds a repeated effect.
 
 ### 6.5 Create a request
 
@@ -1039,8 +1074,9 @@ Either mount the engine and get a working screen, or build your own against the 
 
 ### 6.9 Complex approval workflows
 
-Same declaration, `op.workflow` instead of `op.approvals`. Stages run in order; within a stage, quorums are
-independent counting rules that are OR-ed or AND-ed. Four shapes cover essentially every real policy.
+The same `op.workflow` as §6.4, with a block per stage instead of a single inline rule. Stages run in order;
+within a stage, quorums are independent counting rules that are OR-ed or AND-ed. Four shapes cover
+essentially every real policy.
 
 **(a) "One Admin OR two Owners"** - alternative routes to the same gate
 
@@ -1206,8 +1242,10 @@ it is worth saying what it buys:
 4. **Snapshot-on-create.** The resolved workflow is frozen onto the request and materialised into stages and
    quorums. Editing an operation never retroactively changes an in-flight request, and never leaves one
    wrongly `approved` or wrongly `pending`.
-5. **Explicit retryability.** `idempotent` and `max_attempts` are per-action declarations, not an implicit
-   "failed requests can be retried forever".
+5. **Explicit retryability.** `max_attempts` is a per-action declaration, not an implicit "failed requests
+   can be retried forever". It is the whole of the retry policy: idempotence is required of every target
+   rather than declared per action, because a flag saying "this one is not" would only have meant "do not
+   retry it", which `max_attempts = 1` already says.
 6. **Boot-time verification.** `rake change_requests:verify` (and `to_prepare` in dev/test) asserts every
    service constant resolves, every operation declares a `version`, every quorum declares a positive
    `threshold`, no `all_quorums` stage is unsatisfiable, and no `cooldown` is declared without ActiveJob.
@@ -1217,7 +1255,9 @@ it is worth saying what it buys:
 **The service contract, documented explicitly** (neither source documented it, and both broke on it):
 
 > A change-request target is a **public singleton method** that accepts **keyword arguments only** and whose
-> effect is either transactional or idempotent. It receives `change_request_id:` if it declares that
+> effect is **idempotent** - running it twice with the same payload leaves the same result as running it
+> once. The gem cannot check this and does not try; it retries a failed attempt up to `max_attempts`, and a
+> target that cannot meet the contract must leave that at 1. It receives `change_request_id:` if it declares that
 > keyword - stable across every attempt - which a target calling an external API can pass on as that API's
 > idempotency key.
 
@@ -1266,6 +1306,7 @@ module ChangeRequests
 
       # the subset an approval actually links to: every eligible quorum under any_quorum,
       # the lowest-position one under all_quorums (§5.3)
+      # NOT YET SHIPPED: the built guard returns eligible_quorums in both modes - see §5.3, §17.1
       def countable_quorums = stage.all_quorums? ? eligible_quorums.first(1) : eligible_quorums
 
       def check! = allowed? || raise(NotApprovable.new(request:, reason:))
@@ -1346,7 +1387,8 @@ it, and it is invoked only from `Approve`, `Unapprove` and `Reject`.
 ```
 0. any rejection standing on the current stage?
       yes → stage rejected; it cannot be satisfied however many approvals it holds
-      no, and the stage was rejected → back to pending; clear rejected_at
+      no, and the stage was rejected → back to pending; clear rejected_at   (M9b owns both halves of
+      rejected_at: nothing writes it in M1, so step 0 ships without the clear)
 1. recount every pending quorum of the current stage
       quorum satisfied  ⟺  linked approvals ≥ threshold
 2. stage satisfied      ⟺  any_quorum:  at least one quorum satisfied
@@ -1375,10 +1417,19 @@ was met, which under `all_quorums` happens repeatedly before anything closes; `s
 stage is over. For a single-quorum stage they arrive as a pair one after the other, which is the cost of
 having the multi-quorum case read correctly from the same code.
 
+> **Divergence as of 0.2.x.** Step 1 satisfies quorums silently and every `quorum_satisfied` is emitted from
+> `close_stage!`, so under `all_quorums` a quorum met by an earlier approval gets its event later, stamped
+> with the close time, and a quorum on a stage that never closes gets no event at all. The trail therefore
+> never claims a satisfaction that was later withdrawn - which is the compensating argument, and not the one
+> made above. **Emit it in step 1, where the transition happens**, and let the withdrawal in step 1 be
+> visible too rather than invisible by omission. Unreachable today for the same reason as the linking rule
+> above, and it becomes reachable at the same moment. See §17.1.
+
 **Counting.** An approval counts toward a quorum only via its `change_request_approval_quorums` links,
 written at decision time and never re-derived. Under `any_quorum` an approval links to every quorum the
 actor qualifies for; under `all_quorums` it links to exactly one, the lowest-`position` quorum it qualifies
-for, so one person cannot close two quorums that must both be met.
+for, so one person cannot close two quorums that must both be met - **the second half of which is not
+implemented yet** (§5.3, §17.1).
 
 **Closed stages are immutable.** No approval, unapproval or rejection touches a closed stage, and there is
 no rollback into an earlier one. Once a stage closes, its outcome is a historical fact.
@@ -1449,13 +1500,14 @@ sitting in stage one.
 | `Approve`            | eligible approver for a quorum of the current **open** stage  | request `pending`; actor is not the requester; actor has not already decided this stage | approval row + quorum links; `EvaluateWorkflow`    |
 | `Unapprove`          | the actor who gave that decision                              | their stage still reversible (`pending`, or `satisfied`/`rejected` within cooldown)     | decision and links deleted; `EvaluateWorkflow`     |
 | `Reject`             | eligible approver of the current open stage, or the requester | request `pending`; reason present                                                       | stage `rejected`; request `rejected` once the cooldown elapses, or recorded only (§7.1) |
-| `Cancel`             | the requester, or any eligible approver                       | request not in a final status and not `executing`; reason present                       | request `canceled`                                 |
+| `Cancel`             | the requester, or any eligible approver - **or anyone, once the operation is undeclared** (§5.11) | request not in a final status and not `executing`; reason present | request `canceled`                |
 | `Comment`            | the requester, or any eligible approver                       | always: final statuses **and** undeclared operations included                           | `commented` event                                  |
 | `Execute`            | any actor permitted by the separation-of-duties config        | `approved`, or `failed` and retryable                                                   | §8                                                 |
 | `Execute` + override | actor satisfying `op.override` permissions, not the requester | request non-final and not already `executing`; reason present                           | §8.1                                               |
 | `Expire`             | system only                                                   | `pending` or `approved` past `expires_at`                                               | request `expired`                                  |
 
-Every guard except `Comment` additionally refuses when the operation is no longer declared (§5.11).
+Every guard except `Comment` and `Cancel` additionally refuses when the operation is no longer declared
+(§5.11).
 
 **† `Create` is the one row with no guard object.** A guard is `(request:, actor:)` - "may this actor do
 this *to this row*" - and at creation there is no row. `Commands::Create` therefore performs its own three
@@ -1504,8 +1556,10 @@ change but does leave a durable record of the failure.
 
 Additional guarantees:
 
-- **Retry ceiling.** `retryable?` is `failed? && operation.idempotent? && attempts.count < max_attempts`.
-  A non-idempotent operation is never retryable. There is no counter column - §5.6's rows are the count.
+- **Retry ceiling.** `retryable?` is `failed? && attempts.count < max_attempts`. There is no counter column -
+  §5.6's rows are the count, and no idempotence flag: every target must be idempotent (§6.4, §6.12), so the
+  ceiling is the only thing bounding a repeated effect. A host that cannot make a target idempotent leaves
+  `max_attempts` at its default of 1 and gets one attempt.
 - **Stable identity for the target.** Targets that declare a `change_request_id:` keyword receive
   `request.id`, unchanged across every attempt, so one calling an external API can hand it over as that
   API's idempotency key and a provider that saw a timed-out first call recognises the retry instead of
@@ -2066,7 +2120,7 @@ ChangeRequests::Testing.operations_sandbox do |operations|
     op.service     = "TestTarget"
     op.method_name = :call
     op.version     = "2026-09-09"
-    op.approvals permissions: %w(admin), required: 1
+    op.workflow { |w| w.stage :approval, permissions: %w(admin), threshold: 1 }
   end
 end                                                # original operations restored afterwards
 ```
@@ -2116,16 +2170,18 @@ end
 
 That shared example asserts: the service constant resolves; the action is a public singleton method; every
 declared permissions are Strings that at least one registered actor type's `permissions` lambda can
-actually produce; `idempotent`/`max_attempts` are coherent (a
-non-idempotent action may not declare `max_attempts > 1`); and, if the action declares
-`change_request_id:`, that the method accepts it.
+actually produce; `max_attempts` is at least 1; and, if the action declares `change_request_id:`, that the
+method accepts it.
 
 Also shipped:
 
 - `"a guarded change request command"` - for hosts writing custom commands
 - `"a change requests index view"`, `"a change requests row partial"` - the view contract (§13)
 - `"an idempotent change request target"` - runs the target twice with the same `change_request_id` and
-  asserts a single effect; hosts include it in their own service specs
+  asserts a single effect; hosts include it in their own service specs. **This is the only thing that
+  checks the contract §6.12 requires**: the gem cannot verify idempotence, so the shared example is how a
+  host verifies it of itself, and it matters more now that idempotence is required of every target rather
+  than declared per action.
 - `"a registered actor type"` - asserts the class resolves, `key_type` matches its actual primary key,
   `label` returns a non-blank String for a persisted instance, `permissions` returns an Array of Strings,
   and the batch `finder` returns the same records as `where(id:)`. Hosts run it once per registered type;
@@ -2153,8 +2209,9 @@ A real Rails app on PostgreSQL, with:
 - `Organization` as the tenant type
 - A spec that hard-deletes an `Admin` and asserts every historical request still renders, still exports to
   JSON, and still executes
-- Three demo targets: `Demo::UpdateRoles` (transactional, idempotent), `Demo::ChargeCard` (external,
-  non-idempotent, honours `change_request_id:`), `Demo::Explode` (always raises)
+- Three demo targets: `Demo::UpdateRoles` (transactional), `Demo::ChargeCard` (external, idempotent by
+  handing `change_request_id:` on as the provider's idempotency key - the case that contract exists for),
+  `Demo::Explode` (always raises)
 - Seeds covering every status and a two-stage workflow
 
 `bin/demo` boots it on `localhost:3000` with seeds. This is the view-development harness and the source of
@@ -2187,7 +2244,7 @@ Required areas:
   three dummy actor classes; the CHECK rejecting a doubly-NULL row; named approvers OR-ed in) - and a spec
   asserting `Guards::Approve` and `Request.awaiting_approval_from` agree on every cell, since that
   agreement is the whole reason eligibility is rows
-- execution (success, target raises, retry ceiling, non-idempotent refusal, `change_request_id` propagation, reaper)
+- execution (success, target raises, retry ceiling, `change_request_id` propagation, reaper)
 - override (refused when the action declares none; refused for the requester; refused without a reason when
   required; `overridden_at` set; the `overridden` event's shortfall snapshot matching the state *at claim
   time* and not being rewritten by a later approval)
@@ -2314,12 +2371,12 @@ Estimates assume one experienced developer working from this plan.
 
 | #       | Version   | Scope                                                                                                                                                                                                                      | Spec        | Effort |
 |---------|-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------|--------|
-| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **Not started**: only `bundle gem` output and `rake ci` exist                         | §1, §2, §15 | 5 d    |
-| **M1a** |           | Migrations for all nine tables, **written as the install-generator template**, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability                                                | §4, §5      | 7 d    |
-| **M1b** | 0.2.0     | Guards for the whole §7.2 table, and commands for all of it **except `Execute`**; a minimal `Operations`/`Operation` pulled forward from M2; `with_lock`; sequential multi-stage, single-quorum evaluation; error taxonomy | §7          | 11 d   |
-| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL, `op.cooldown`, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry, `op.approvals` and materialise-on-create land early, in M1b               | §6.4, §6.12 | 2–3 d  |
-| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, the §8.1 override branch. **Concurrency specs.** `Guards::Execute` lands in M1b                                   | §8, §15.3   | 3 d    |
-| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!`, rake tasks                                                                                                                         | §8, §5.11   | 2 d    |
+| **M0**  | 0.1.0     | Engine skeleton, Zeitwerk, `Configuration` + `validate!`, gemspec deps, dummy app, CI matrix, `rake ci`, headless + packaging specs. **Shipped**                                                                            | §1, §2, §15 | 5 d    |
+| **M1a** |           | Migrations for all nine tables, **written as the install-generator template**, models, indexes, CHECK constraints, readonly attrs, terminal-state guard, event immutability. **Shipped**                                   | §4, §5      | 7 d    |
+| **M1b** | 0.2.0     | Guards for the whole §7.2 table, and commands for all of it **except `Execute`**; a minimal `Operations`/`Operation` pulled forward from M2; `with_lock`; sequential multi-stage, single-quorum evaluation; error taxonomy. **Shipped**, plus the `all_quorums` satisfaction rule (§7.1) - whose linking half is still M9a's, see §17.1 | §7          | 11 d   |
+| **M2**  | 0.3.0     | Operations, completed: the full `op.workflow` DSL — which **replaces** M1b's `op.approvals` shorthand — plus `op.cooldown`, `verify!`, `ChangeRequests.request!`, `rake change_requests:verify`. Registry and materialise-on-create landed early, in M1b | §6.4, §6.12 | 4.5 d  |
+| **M3a** |           | `Commands::Execute` and claim-then-invoke: `executing`, attempt rows, conditional UPDATE, retry ceiling, `Commands::Override` and the §8.1 branch. **Concurrency specs.** `Guards::Execute` landed in M1b                    | §8, §15.3   | 4.5 d  |
+| **M3b** | 0.4.0     | Background execution job, stuck-execution reaper, expiry sweeper, `cancel_undeclared!` and `Commands::CancelUndeclared`, rake tasks                                                                                         | §8, §5.11   | 2.25 d |
 | **M4**  | 0.5.0     | Actor-type registration, `ActorRef`, batch resolution, label snapshots, authorization adapter, `visible_scope`, tenancy, separation-of-duties flags, `ChangeRequests::Actor`                                               | §9          | 2–3 d  |
 | **M5**  | 0.6.0     | Presenters, value objects, collection eager loading, `as_json`                                                                                                                                                             | §11         | 3 d    |
 | **M6a** |           | Base + requests controllers, routes, `rescue_from`, `visible_to` on index **and** show, index page with filters, sorting, pagination, `Operation#requestable_by?` (§7.2 †)                                             | §12 Tier 1  | 3 d    |
@@ -2327,7 +2384,7 @@ Estimates assume one experienced developer working from this plan.
 | **M6c** | 0.7.0     | i18n, optional stylesheet, CSS class contract, Turbo-optional responses, Stimulus fallbacks, `bin/demo`, view + request specs                                                                                              | §12 Tier 2  | 2–3 d  |
 | **M7**  | 0.8.0     | Generators (install, operation, controller, views, scaffold_ui) + generator specs + generate-on-a-real-app CI job                                                                                                          | §13         | 4 d    |
 | **M8**  | 0.9.0     | Host test kit: `change_requests/rspec`, `Testing`, matchers, shared examples, factories, `docs/07_testing.md`                                                                                                              | §14         | 3–4 d  |
-| **M9a** |           | Multi-quorum evaluation: `all_quorums`, one-quorum-per-approval linking, named approvers. `any_quorum`, sequential stage advance and stage closing land in M1b                                                             | §7.1        | 2–3 d  |
+| **M9a** |           | Multi-quorum evaluation: one-quorum-per-approval linking, per-quorum `quorum_satisfied` timing, named approvers. `any_quorum`, `all_quorums` satisfaction, sequential stage advance and stage closing land in M1b. **Carries two correctness gaps, not only features - must land before or with M2** (§17.1) | §7.1        | 2–3 d  |
 | **M9b** |           | `op.cooldown` over both decisions: `CloseStageJob`, unapproval inside the window, a rejected stage returning to `pending` when its last rejection is withdrawn, `close_due_stages!` fallback                                | §7.1        | 2–3 d  |
 | **M9c** | 0.10.0    | `awaiting_approval_from` inbox scope, guard/scope equivalence spec, UI stage and quorum progress                                                                                                                           | §5.3, §11   | 2 d    |
 | **M10** | 0.11.0    | Notifications (`on_event` after_commit, `ActiveSupport::Notifications`), maintenance rake tasks                                                                                                                            | §10         | 2–3 d  |
@@ -2342,14 +2399,28 @@ retrofit, while the multi-quorum evaluation logic and its UI can wait until the 
 exercised. M1b does ship the sequential stage advance, because that is `position + 1` and deferring it would
 mean rewriting `EvaluateWorkflow` in M9a rather than extending it.
 
+**That argument no longer covers all of M9a.** M1b also shipped the `all_quorums` *satisfaction* rule, on
+the grounds that a stage declared "1 Admin AND 2 Owners" must not close on the Admin alone. The *linking*
+rule that makes the same sentence true for one person holding both roles stayed in M9a, so the hole it was
+closing is still open from the other side (§5.3), and the per-quorum event timing went with it (§7.1).
+Neither is reachable while `op.approvals` is the only declaration syntax - **and M2 is what ends that**.
+Shipping M2 ahead of M9a makes both silently reachable in 0.3.0 and leaves them there until 0.10.0.
+
+**That is the accepted trade** (§17.1): nothing is released, no host can meet the gap, and reordering seven
+milestones or refusing a shape the docs describe both cost more than carrying it. What the decision buys is
+that it must not be carried *silently* - `Plan_M2.md` M2-6 pins it as a pending spec naming M9a, so the
+suite reddens when M9a closes it rather than the gap being noticed by a host.
+
 ### 17.1 Gaps to close before ticketing those parts
 
 Everything else in the table is specified well enough that tickets can be written from the referenced
-sections. These six are not, and each needs a decision rather than more prose:
+sections. These seven are not, and each needs a decision rather than more prose. Two are now closed, struck below,
+and left in place because the reasoning behind a closed question is worth as much as the answer:
 
 | Part    | What is missing                                                                                                                                            |
 |---------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **M2**  | What `verify!` prints when it fails - one line per problem, or one raised error listing all of them.                                                       |
+| ~~**M2 / M9a**~~ | **Closed: M2 ships first and M9a keeps the linking rule.** Nothing is released, so `all_quorums` is declarable and knowingly incomplete between 0.3.0 and M9a rather than reordering seven milestones or teaching `verify!` to refuse a shape the docs describe. `Plan_M2.md` M2-6 carries a pending spec naming M9a, so the gap is visible in the suite and reddens the moment it is closed. |
+| ~~**M2**~~  | **Closed: the same as `Configuration#validate!`** - one raised error listing every problem, so a host that has seen one of these has seen both.       |
 | **M5**  | `as_json` is called a documented, versioned contract but its keys and value types are never written out.                                                   |
 | **M6b** | The show page has an inventory of partials but no layout: what appears, in what order, and what an empty timeline or a nil executer renders.               |
 | **M7**  | `scaffold_ui` output is one line. Which files, in which namespace, with which route helpers and layout assumptions.                                        |
@@ -2425,6 +2496,19 @@ The non-goals list ships in the README: it tells an evaluator in ninety seconds 
     which is what gives `Unapprove` something to undo. At the default of `0` the behaviour is unchanged, so
     M1 is unaffected; the reversible half ships with M9b. A stage holding a standing rejection can never be
     satisfied, and returns to `pending` when the last rejection on it is withdrawn.
+21. **A satisfaction rule without its linking rule is half a rule, and the half that was checked.** M1b
+    shipped `all_quorums` satisfaction so that "1 Admin AND 2 Owners" could not close on the Admin alone,
+    and left `countable_quorums` returning every eligible quorum - so one person holding both roles closes
+    both quorums with one approval and reaches the same outcome by the other route (§5.3). The lesson is
+    not the bug, which is one line: it is that the two halves of an AND were split across milestones seven
+    apart on the strength of one of them being cheap. **Rules that are only true in pairs ship in pairs**,
+    or the one that ships gets a spec proving the other half is unreachable.
+22. **Unreachable is a property of the declaration syntax, not of the code.** Both open gaps above are
+    harmless in 0.2.x for exactly one reason: the shipped declaration syntax can only describe a
+    single-quorum stage. That
+    is not a guarantee the evaluator makes, it is a limit of the shorthand, and M2 removes it. Anything
+    deferred on "nothing can reach it today" records **what** makes it unreachable and **which milestone
+    ends that**, in the milestone table, or the reasoning expires silently.
 
 ## 20. Appendix: salvage from the existing implementations
 
