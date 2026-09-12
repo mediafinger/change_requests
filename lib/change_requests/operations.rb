@@ -41,6 +41,24 @@ module ChangeRequests
       @operations.clear
     end
 
+    # Boot-time verification (§6.12 point 6), run by `rake change_requests:verify` and by the
+    # engine's to_prepare hook in development. One raised error listing every problem, the shape
+    # `Configuration#validate!` already uses (Q4).
+    def verify!
+      problems = self.problems
+
+      return true if problems.empty?
+
+      fail ConfigurationError,
+           "ChangeRequests operations are misconfigured:\n- #{problems.join("\n- ")}"
+    end
+
+    def problems
+      @operations.each_value.flat_map do |operation|
+        (operation.problems + operation.target_problems).map { |problem| "#{operation.key}: #{problem}" }
+      end
+    end
+
     private
 
     def initialize_copy(source)

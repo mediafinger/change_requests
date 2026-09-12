@@ -66,8 +66,24 @@ module ChangeRequests
            "ChangeRequests operation #{key.inspect} is misconfigured:\n- #{problems.join("\n- ")}"
     end
 
+    # Everything checkable without loading the host's classes. One implementation, three readers:
+    # `validate!` at declaration, `Commands::Create` at creation and `Operations#verify!` at boot,
+    # so none of them can disagree about what a complete declaration is (§7.2 †, §6.12 point 6).
     def problems
-      [version_problem].compact
+      [version_problem, service_problem, workflow_problem, *threshold_problems].compact
+    end
+
+    # What needs the host's classes loaded, so it runs at boot and nowhere else: the constant
+    # resolves, and it answers the singleton method dispatch will call (§6.12 point 6).
+    def target_problems
+      return [] if service.blank?
+
+      target = service.to_s.safe_constantize
+
+      return [unresolved_service_problem] if target.nil?
+      return [unanswered_method_problem] unless target.respond_to?(method_name)
+
+      []
     end
 
     private
@@ -77,6 +93,49 @@ module ChangeRequests
 
       "op.version is #{version.inspect}. Every operation declares one, it is snapshotted onto " \
         "every request as a NOT NULL column, and the gem never judges its content (§5.10)."
+    end
+
+    def service_problem
+      return if service.present?
+
+      "it declares no service, so nothing could ever execute it - set `op.service`"
+    end
+
+    def workflow_problem
+      return unless workflow.empty?
+
+      "it declares no approvals, so a request could never be approved - declare `op.workflow`"
+    end
+
+    # The DSL refuses these at declaration. Re-checked so one call reports everything, and so a
+    # hand-built description cannot enter the registry unnoticed.
+    def threshold_problems
+      workflow.stages.flat_map do |stage|
+        stage.quorums.filter_map { |quorum| threshold_problem(stage, quorum) }
+      end
+    end
+
+    def threshold_problem(stage, quorum)
+      return if quorum.threshold.is_a?(Integer) && quorum.threshold >= 1
+
+      "#{describe(stage, quorum)} has threshold #{quorum.threshold.inspect}. " \
+        "One approval is the minimum, not zero (§5.3)."
+    end
+
+    def describe(stage, quorum)
+      return "stage #{stage.name.to_sym.inspect}" if quorum.name.nil?
+
+      "stage #{stage.name.to_sym.inspect} quorum #{quorum.name.to_sym.inspect}"
+    end
+
+    def unresolved_service_problem
+      "op.service is #{service.inspect}, which does not resolve to a constant. Execution " \
+        "dispatches through the declaration, never through the strings on the row (§6.12 point 1)."
+    end
+
+    def unanswered_method_problem
+      "#{service} does not answer .#{method_name}. Dispatch calls the public singleton method, so " \
+        "an instance method of the same name is not the one it will reach (§6.12)."
     end
   end
 end

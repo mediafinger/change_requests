@@ -5,6 +5,14 @@
 # it. The examples below are mirrors: whichever runs first, the other must not see its writes, so
 # each pair proves isolation under any seed.
 RSpec.describe GlobalState do
+  def declare_operation(key)
+    ChangeRequests.operations.define(key) do |op|
+      op.version = "1"
+      op.service = "Probes::Target"
+      op.workflow { |w| w.stage :approval, permissions: %w(owner) }
+    end
+  end
+
   def register_actor_type(name)
     ChangeRequests.configure do |config|
       config.actor_type(name) do |type|
@@ -29,13 +37,13 @@ RSpec.describe GlobalState do
   it "does not carry a declared operation into the other example (1 of 2)" do
     expect(ChangeRequests.operations.keys).not_to include("leak_probe.two")
 
-    ChangeRequests.operations.define("leak_probe.one") { |op| op.version = "1" }
+    declare_operation("leak_probe.one")
   end
 
   it "does not carry a declared operation into the other example (2 of 2)" do
     expect(ChangeRequests.operations.keys).not_to include("leak_probe.one")
 
-    ChangeRequests.operations.define("leak_probe.two") { |op| op.version = "1" }
+    declare_operation("leak_probe.two")
   end
 
   it "does not carry a changed setting into the other example (1 of 2)" do
