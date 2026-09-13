@@ -9,14 +9,20 @@ decision already taken.
 **Both milestones depend on all of M6.** Three generators eject or scaffold views, and three of M8's shared
 examples assert the view contract — neither can be written before the views exist.
 
+**M8 is built before M7.** M7's generators write `spec_support.rb.tt` (`require "change_requests/rspec"`)
+and `action_spec.rb.tt` (`it_behaves_like "a registered change request operation"`), and M7-7 exercises
+them in CI. If M7 were built first, its generated spec templates could not be executed and M7-7's CI job
+would fail. M8 has no dependency on M7 (it tests the domain core, presenters, and M6's views), so
+building M8 first ensures M7 generates working, verifiable specs.
+
 ---
 
 ## 1. Scope
 
-| Milestone | Version | What it is                                                                  | Spec |
-|-----------|---------|------------------------------------------------------------------------------|------|
-| **M7**    | 0.8.0   | `install`, `operation`, `controller`, `views`, `scaffold_ui`, `migration_upgrade`, their templates, and a generate-on-a-real-app CI job | §13  |
-| **M8**    | 0.9.0   | `change_requests/rspec`, `Testing`, shared contexts, builders, matchers, shared examples, test-mode toggles, `docs/07_testing.md` | §14  |
+| Milestone | Version | What it is                                                                                                                              | Spec |
+|-----------|---------|-----------------------------------------------------------------------------------------------------------------------------------------|------|
+| **M8**    | 0.8.0   | `change_requests/rspec`, `Testing`, shared contexts, builders, matchers, shared examples, test-mode toggles, `docs/07_testing.md`       | §14  |
+| **M7**    | 0.9.0   | `install`, `operation`, `controller`, `views`, `scaffold_ui`, `migration_upgrade`, their templates, and a generate-on-a-real-app CI job | §13  |
 
 **Not here.** M9's evaluation work, notifications (M10), the release itself (M11).
 
@@ -38,12 +44,12 @@ examples assert the view contract — neither can be written before the views ex
 
 **Declared but built by nothing:**
 
-| Surface                                                                 | Declared in | Consumed by |
-|-------------------------------------------------------------------------|-------------|-------------|
-| Five of the six generators, and every template but the migration         | §13         | M7          |
-| `lib/change_requests/rspec.rb` — already `loader.ignore`d, and absent     | §2, §14     | M8-1        |
-| `lib/change_requests/factories.rb`, `ChangeRequests.factories_path`       | §2, §14.3   | M8-5        |
-| Every matcher, shared context and shared example in §14                   | §14         | M8          |
+| Surface                                                               | Declared in | Consumed by |
+|-----------------------------------------------------------------------|-------------|-------------|
+| Five of the six generators, and every template but the migration      | §13         | M7          |
+| `lib/change_requests/rspec.rb` — already `loader.ignore`d, and absent | §2, §14     | M8-1        |
+| `lib/change_requests/factories.rb`, `ChangeRequests.factories_path`   | §2, §14.3   | M8-5        |
+| Every matcher, shared context and shared example in §14               | §14         | M8          |
 
 **Three facts that shape these tickets:**
 
@@ -61,16 +67,17 @@ examples assert the view contract — neither can be written before the views ex
 ## 3. Build order
 
 ```
-M7-1  install ─→ M7-2  operation ─→ M7-3  controller
-M7-4  views ─→ M7-5  scaffold_ui
-M7-6  migration_upgrade
-M7-7  generate-on-a-real-app CI job          (last: it exercises all six)
-
 M8-1  rspec.rb + contexts ─┬─→ M8-2  operation sandbox and builders
                            ├─→ M8-3  matchers
-                           ├─→ M8-4  shared examples
+                           ├─→ M8-4  shared examples ─→ M8-7  docs/07
                            ├─→ M8-5  factories
-                           └─→ M8-6  toggles ─→ M8-7  docs/07
+                           └─→ M8-6  toggles
+                                 │
+M7-1  install ───────────────────┼─→ M7-2  operation ─→ M7-3  controller
+                                 ├─→ M7-4  views ─→ M7-5  scaffold_ui
+                                 └─→ M7-6  migration_upgrade
+                                       │
+                                       └─→ M7-7  generate-on-a-real-app CI job
 ```
 
 ---
@@ -79,7 +86,7 @@ M8-1  rspec.rb + contexts ─┬─→ M8-2  operation sandbox and builders
 
 ### M7-1 — `change_requests:install`
 **Spec:** §13
-**Depends on:** M6c-3
+**Depends on:** M8-1, M6c-3
 
 **Deliver** the generator every adopter runs first:
 
@@ -117,7 +124,7 @@ agree; running it twice is idempotent or refuses clearly.
 
 ### M7-2 — `change_requests:operation NAME`
 **Spec:** §13, §6.12
-**Depends on:** M7-1
+**Depends on:** M7-1, M8-4
 
 **Deliver** the generator that makes a new operation hard to get wrong:
 
@@ -187,7 +194,7 @@ matches M6b-6's document, asserted against it.
 
 ### M7-5 — `change_requests:scaffold_ui`
 **Spec:** §13, §12 Tier 5
-**Depends on:** M7-4
+**Depends on:** M7-4, M8-4
 
 **Confirmed wanted**, and not a generator to talk anyone out of: the scaffold is what makes a first
 adoption or a heavy customisation tractable, for teams whose approvals screen has to live inside an
@@ -237,7 +244,7 @@ emitted.
 
 ### M7-7 — Generate on a real application, in CI
 **Spec:** §13's packaging requirement, §15.4
-**Depends on:** M7-1 … M7-6
+**Depends on:** M7-1 … M7-6, M8-4
 
 **Deliver** the CI job §17 names, which is the only thing that catches a template that does not ship:
 
@@ -258,7 +265,7 @@ generated application boots and its specs pass; the job runs against the package
 
 ### M8-1 — `change_requests/rspec` and the shared contexts
 **Spec:** §14, §14.1
-**Depends on:** M7-1
+**Depends on:** M6c-7
 
 **Deliver** the entry point a host requires, and the two contexts it brings:
 
@@ -454,20 +461,20 @@ the matcher list and the shipped matchers agree, checked programmatically.
 
 **Five raised, five answered.** One is §17.1's M7 row, now closed.
 
-| ID     | Question                                                              | Answer                                                                                                                                                                                                                                                                    |
-|--------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q1** | How does `initializer.rb.tt` stay complete as `Configuration` grows?    | **A spec compares the template's key list against `Configuration`, in both directions.** The template is the closest thing the gem has to a reference for §10, and M2, M3b and M6 each added keys — three chances to have silently drifted, had the check existed.        |
-| **Q2** | `scaffold_ui`'s output is one line in §13 (§17.1).                      | **Settled in M7-5**: the engine's controller and views, rewritten into the host's namespace with the host's parent, layout and route helpers, engine unmounted. The acceptance is that the generated views pass M6c-7's shared examples — equivalent, not merely similar. |
-| **Q3** | Where does the RSpec dependency live?                                  | **In `change_requests/rspec.rb` only.** `ChangeRequests::Testing` is domain code that loads headless today and must continue to; a subprocess spec asserts it. The kit's entry point may require RSpec, the domain may not.                                            |
-| **Q4** | `be_awaiting_approval_from` needs a scope M9c owns.                    | **Ship it pending, naming M9c.** The same tripwire M2-6 and M5-3 use: it reddens when the scope lands rather than being remembered.                                                                                                                                     |
-| **Q5** | `capture_events` bypasses `config.on_event`, which is M10.             | **Ship it inert.** It collects events correctly today, and the bypass becomes meaningful the moment M10 adds the hook. Writing it later would mean writing the collection twice.                                                                                          |
+| ID     | Question                                                             | Answer                                                                                                                                                                                                                                                                    |
+|--------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q1** | How does `initializer.rb.tt` stay complete as `Configuration` grows? | **A spec compares the template's key list against `Configuration`, in both directions.** The template is the closest thing the gem has to a reference for §10, and M2, M3b and M6 each added keys — three chances to have silently drifted, had the check existed.        |
+| **Q2** | `scaffold_ui`'s output is one line in §13 (§17.1).                   | **Settled in M7-5**: the engine's controller and views, rewritten into the host's namespace with the host's parent, layout and route helpers, engine unmounted. The acceptance is that the generated views pass M6c-7's shared examples — equivalent, not merely similar. |
+| **Q3** | Where does the RSpec dependency live?                                | **In `change_requests/rspec.rb` only.** `ChangeRequests::Testing` is domain code that loads headless today and must continue to; a subprocess spec asserts it. The kit's entry point may require RSpec, the domain may not.                                               |
+| **Q4** | `be_awaiting_approval_from` needs a scope M9c owns.                  | **Ship it pending, naming M9c.** The same tripwire M2-6 and M5-3 use: it reddens when the scope lands rather than being remembered.                                                                                                                                       |
+| **Q5** | `capture_events` bypasses `config.on_event`, which is M10.           | **Ship it inert.** It collects events correctly today, and the bypass becomes meaningful the moment M10 adds the hook. Writing it later would mean writing the collection twice.                                                                                          |
 
 ### Changes these answers make to `PLAN.md`
 
-| Section   | Change                                                            | From |
-|-----------|-------------------------------------------------------------------|------|
-| **§13**   | `scaffold_ui`'s output, written out                                | Q2   |
-| **§17.1** | The M7 row closes                                                  | Q2   |
+| Section   | Change                              | From |
+|-----------|-------------------------------------|------|
+| **§13**   | `scaffold_ui`'s output, written out | Q2   |
+| **§17.1** | The M7 row closes                   | Q2   |
 
 ---
 

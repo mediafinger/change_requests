@@ -12,11 +12,11 @@ decision already taken.
 
 ## 1. Scope
 
-| Milestone | Version | What it is                                                                                     | Spec        |
-|-----------|---------|------------------------------------------------------------------------------------------------|-------------|
-| **M9a**   | 0.4.1   | One-quorum-per-approval linking under `all_quorums`, per-quorum `quorum_satisfied` timing, named approvers | §7.1, §5.3  |
-| **M4**    | 0.5.0   | `ActorRef`, batch resolution, label strategy, deep links, `visible_scope`, tenancy, `ChangeRequests::Actor` | §9, §5.7    |
-| **M5**    | 0.6.0   | Presenters, the `Value::*` objects, collection eager loading, the documented `as_json` contract | §11, §5.12  |
+| Milestone | Version | What it is                                                                                                  | Spec       |
+|-----------|---------|-------------------------------------------------------------------------------------------------------------|------------|
+| **M9a**   | 0.4.1   | One-quorum-per-approval linking under `all_quorums`, per-quorum `quorum_satisfied` timing, named approvers  | §7.1, §5.3 |
+| **M4**    | 0.5.0   | `ActorRef`, batch resolution, label strategy, deep links, `visible_scope`, tenancy, `ChangeRequests::Actor` | §9, §5.7   |
+| **M5**    | 0.6.0   | Presenters, the `Value::*` objects, collection eager loading, the documented `as_json` contract             | §11, §5.12 |
 
 **Not here.** The controllers and views that render any of this (M6), the generators (M7), the host test
 kit (M8), cooldown (M9b), `awaiting_approval_from` (M9c), notifications (M10).
@@ -53,14 +53,14 @@ nothing but a tidier sequence.
 
 **Declared but read by nothing** — each is a ticket below, not an oversight to rediscover:
 
-| Surface                             | Declared in                                | Consumed by                        |
-|-------------------------------------|--------------------------------------------|------------------------------------|
-| `config.actor_label_strategy`       | `Configuration`, validated, defaults `:live` | **M4-1** — `ActorRef#label`        |
-| `t.finder`                          | §9 only; **not on `ActorType`**              | M4-2                               |
-| `t.path`                            | §9 only; **not on `ActorType`**              | M4-1                               |
-| `config.visible_scope`, `tenant_for`| §9.3, §10 only; **not on `Configuration`**   | M4-3                               |
-| `config.payload_preview_limit`, `payload_renderer` | §10, §5.12 only; **not on `Configuration`** | M5-2 |
-| `lib/change_requests/presenters/`   | a `.keep` file                               | M5                                 |
+| Surface                                            | Declared in                                  | Consumed by                 |
+|----------------------------------------------------|----------------------------------------------|-----------------------------|
+| `config.actor_label_strategy`                      | `Configuration`, validated, defaults `:live` | **M4-1** — `ActorRef#label` |
+| `t.finder`                                         | §9 only; **not on `ActorType`**              | M4-2                        |
+| `t.path`                                           | §9 only; **not on `ActorType`**              | M4-1                        |
+| `config.visible_scope`, `tenant_for`               | §9.3, §10 only; **not on `Configuration`**   | M4-3                        |
+| `config.payload_preview_limit`, `payload_renderer` | §10, §5.12 only; **not on `Configuration`**  | M5-2                        |
+| `lib/change_requests/presenters/`                  | a `.keep` file                               | M5                          |
 
 **What M9a inherits, specifically:**
 
@@ -150,21 +150,22 @@ example is un-pended and passes.
 
 - `quorum_satisfied` is emitted in **step 1**, when the quorum's status changes to satisfied — not from
   `close_stage!`.
-- A quorum that **stops** being satisfied (an unapproval dropping it below threshold) emits its transition
-  too, rather than being silently un-satisfied. §7.1 asks for the withdrawal to be "visible rather than
-  invisible by omission".
+- A quorum that **stops** being satisfied (an unapproval dropping it below threshold) returns to `pending`
+  and clears `satisfied_at` in step 1. The unapproval event emitted by `Commands::Unapprove` carries the
+  quorum metadata, so the withdrawal is visible in the trail rather than invisible by omission (§7.1).
 - `stage_satisfied` still comes from `close_stage!` and still names the quorum that closed it.
 - For a single-quorum stage the two arrive as a pair, one after the other — "the cost of having the
   multi-quorum case read correctly from the same code".
 
 **This changes the trail's meaning, deliberately.** Today the trail never claims a satisfaction that was
 later withdrawn, which is the compensating argument §7.1 records and rejects. After this it claims both the
-satisfaction and the withdrawal, which is more information and a longer timeline (**Q6**).
+satisfaction and the withdrawal (via the `unapproved` event and quorum status demotion), which is more
+information and a longer timeline (**Q6**).
 
 **Acceptance:** an `all_quorums` stage emits one `quorum_satisfied` per quorum, each at the moment that
 quorum was met and stamped with that time; a stage that never closes still emits the events for the quorums
-that were met; an unapproval below threshold emits the withdrawal; `stage_satisfied` still names the
-closing quorum.
+that were met; an unapproval below threshold returns the quorum to pending and clears `satisfied_at`;
+`stage_satisfied` still names the closing quorum.
 **Est:** 0.75 d
 
 ---
@@ -182,10 +183,15 @@ closing quorum.
   union.
 - M5-3's `remaining_options` must then render a named quorum honestly — "1 more from Cleo or Gene", not
   "1 more from named" — which it can, because this ticket lands first.
+- **The §6.12 point 6 check**: `Operations#verify!` checks that no `all_quorums` stage is statically
+  unsatisfiable. A quorum declaring named approvers (`eligible_actors`), no permission rows
+  (`permissions.empty?`), and fewer named actors than its `threshold` (`eligible_actors.size < threshold`)
+  is refused with `ConfigurationError` (**Q7**, closing §17.1's open M9a row).
 
 **Acceptance:** §6.9 shape (d)'s `:named` quorum behaves identically to a permission quorum under the
 linking rule; an actor named on two quorums of an `all_quorums` stage links to one; a mixed quorum counts
-an actor who qualifies either way, once.
+an actor who qualifies either way, once; `verify!` refuses an `all_quorums` stage with an unsatisfiable
+named quorum.
 **Est:** 0.5 d
 
 ---
@@ -205,11 +211,12 @@ ref.type       # "Admin"
 ref.id         # "42"      - string, exactly as stored
 ref.label      # the live label if the record resolves, else the snapshot
 ref.snapshot   # the label exactly as recorded at write time
+ref.identity   # the snapshotted identity if the column exists, else nil
 ref.resolved?  # false once the record is gone
 ref.deleted?   # the inverse; drives the "(deleted)" affordance
 ref.record     # the Admin, or nil - lazily resolved
 ref.path(routes)
-ref.to_h       # { type:, id:, label: } - what the reader used to return
+ref.to_h       # { type:, id:, label:, identity: } - what the reader used to return
 ```
 
 - A plain class in `lib/change_requests/actor_ref.rb`, not a `Data`: `record` is lazily resolved and
@@ -223,6 +230,8 @@ ref.to_h       # { type:, id:, label: } - what the reader used to return
   declared `key_type`, and an actor class that has been removed from the application entirely all produce
   `resolved? == false`, never an exception (**Q2**).
 - `ActorRef` takes an already-resolved record when it has one, which is what M4-2's batch loading injects.
+- `ActorRef#identity` preserves the snapshotted identity column, and `Guards::Base#identity_of` and
+  `#reference_of` accept `ActorRef` so `same_person?` works across actor classes even for deleted actors.
 - The `SYSTEM_ACTOR` sentinel is an `ActorRef` too — resolved? false, label "System", `record` nil — so a
   timeline never branches on it (§19.15).
 
@@ -231,6 +240,7 @@ compares against the old hash in roughly forty places. `to_h` keeps the shape av
 become `.to_h` and the interesting ones become `.label` or `.type`.
 
 **Acceptance:** every actor reader returns an `ActorRef`; `to_h` equals what the reader returned before;
+`same_person?` correctly matches an `ActorRef` against live actors and other refs using `ref.identity`;
 `:live` prefers the record and falls back to the snapshot; `:snapshot` never queries at all — asserted by
 counting queries, not by trusting the branch; a deleted record leaves `deleted?` true and `label` intact; an
 unregistered actor class on an old row resolves to nothing rather than raising.
@@ -359,14 +369,14 @@ gem the gemspec does not depend on as a requirement.
 **Deliver** the value objects every presenter method returns, under
 `lib/change_requests/presenters/value/`:
 
-| Object                | Carries                                                                                      |
-|-----------------------|----------------------------------------------------------------------------------------------|
-| `Value::Field`        | `key`, `label`, `value`                                                                        |
-| `Value::Status`       | `key`, `label`, `tone`, `tooltip`                                                              |
-| `Value::Quorum`       | `name`, `label`, `required`, `approved`, `satisfied?`, `approvers`                             |
-| `Value::StageProgress`| `name`, `label`, `position`, `status`, `satisfied?`, `current?`, `satisfied_by`, `satisfied_via`, `remaining_options`, `quorums` |
-| `Value::Action`       | `name`, `label`, `enabled`, `reason`, `method`, `path`, `confirm`, `tone`, `requires_reason`   |
-| `Value::TimelineEntry`| `kind`, `label`, `actor`, `body`, `metadata`, `occurred_at`, `operation_version`               |
+| Object                 | Carries                                                                                                                          |
+|------------------------|----------------------------------------------------------------------------------------------------------------------------------|
+| `Value::Field`         | `key`, `label`, `value`                                                                                                          |
+| `Value::Status`        | `key`, `label`, `tone`, `tooltip`                                                                                                |
+| `Value::Quorum`        | `name`, `label`, `required`, `approved`, `satisfied?`, `approvers`                                                               |
+| `Value::StageProgress` | `name`, `label`, `position`, `status`, `satisfied?`, `current?`, `satisfied_by`, `satisfied_via`, `remaining_options`, `quorums` |
+| `Value::Action`        | `name`, `label`, `enabled`, `reason`, `method`, `path`, `confirm`, `tone`, `requires_reason`                                     |
+| `Value::TimelineEntry` | `kind`, `label`, `actor`, `body`, `metadata`, `occurred_at`, `operation_version`                                                 |
 
 - All `Data`, as `Workflow::Stage` and its siblings already are: comparable by value, so a presenter spec
   asserts a whole structure in one expectation.
@@ -539,16 +549,17 @@ document cannot drift from the code; every value type matches the table; `routes
 
 ## 7. Questions
 
-**Six raised, six answered.** Three of them are §17.1 rows, now closed.
+**Seven raised, seven answered.** Four of them are §17.1 rows, now closed.
 
-| ID     | Question                                                     | Answer                                                                                                                                                                                                                                                          |
-|--------|--------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q1** | M5 would render quorum state M9a has not made correct.        | **M9a is pulled ahead and goes first.** Every milestone after it adds surface that displays the number — M5-3 renders it, M5-4 sits beside it, M6b-2 draws it, M9c-1 queries around it — so fixing the count once, before anything reads it, is cheaper than fixing it and then revising four tickets' worth of work. The two tripwires that were holding the gap (`shapes_spec`'s pending example, and the one M5-3 would have carried) are resolved by M9a-1 rather than accumulated. §17's milestone table is reordered to match. |
-| **Q6** | Moving `quorum_satisfied` to step 1 makes the trail claim satisfactions that were later withdrawn. | **Emit both, as §7.1 asks.** The current behaviour's only virtue is that it never records a satisfaction that was undone — but it achieves that by recording nothing, and a quorum on a stage that never closes gets no event at all. A trail that says "met, then withdrawn" is more honest than one that says nothing, and M9a-2 emits the withdrawal too so the pair reads correctly. |
-| **Q2** | `key_type` casting rules, and what `finder` returns for ids that no longer resolve (§17.1). | **`key_type` governs the cast; anything that will not cast is dropped.** `:integer` parses and drops what will not parse, `:uuid` validates the format and drops what does not match, `:string` passes through verbatim — the escape hatch for ULIDs and every other key shape. `finder` returns what it finds: missing ids are absent, never nil placeholders and never an exception, and their refs report `resolved? == false`. This is §11's "deleted actors degrade, never raise" extended to malformed ids, which is the same failure from the reader's side. |
-| **Q3** | What `ChangeRequests::Actor` actually provides (§2 names it; §9 never describes it). | **Read-side conveniences only, registering nothing.** Registration is `config.actor_type`; a concern that also registered would put the same fact in two places, which is how they drift. M4-4 lists the three methods; the inbox reader waits for M9c to own the scope. |
-| **Q4** | §11 orders `payload_preview` by "schema order"; §5.12 orders it alphabetically. | **Alphabetically, and §11 is corrected.** §5.12 carries the reason — `jsonb` does not preserve insertion order, so alphabetical is the only ordering that is both deterministic and explicable — and §11 states the conclusion without it. There is no schema to order by. |
-| **Q5** | `as_json` is a documented versioned contract whose keys and value types were never written out (§17.1). | **Written out below.** It closes §17.1's M5 row and is M5-7's input.                                                                                                                                                                                            |
+| ID     | Question                                                                                                | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|--------|---------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q1** | M5 would render quorum state M9a has not made correct.                                                  | **M9a is pulled ahead and goes first.** Every milestone after it adds surface that displays the number — M5-3 renders it, M5-4 sits beside it, M6b-2 draws it, M9c-1 queries around it — so fixing the count once, before anything reads it, is cheaper than fixing it and then revising four tickets' worth of work. The two tripwires that were holding the gap (`shapes_spec`'s pending example, and the one M5-3 would have carried) are resolved by M9a-1 rather than accumulated. §17's milestone table is reordered to match.                                              |
+| **Q6** | Moving `quorum_satisfied` to step 1 makes the trail claim satisfactions that were later withdrawn.      | **Visible rather than invisible by omission, as §7.1 asks.** The current behaviour's only virtue is that it never records a satisfaction that was undone — but it achieves that by recording nothing, and a quorum on a stage that never closes gets no event at all. Emitting `quorum_satisfied` in step 1 pairs with the `unapproved` event (which carries the quorum metadata) when a decision is withdrawn, and step 1 demotes the quorum back to `pending`. Both the satisfaction and the withdrawal are thus legible in the trail without inventing an unlisted event kind. |
+| **Q2** | `key_type` casting rules, and what `finder` returns for ids that no longer resolve (§17.1).             | **`key_type` governs the cast; anything that will not cast is dropped.** `:integer` parses and drops what will not parse, `:uuid` validates the format and drops what does not match, `:string` passes through verbatim — the escape hatch for ULIDs and every other key shape. `finder` returns what it finds: missing ids are absent, never nil placeholders and never an exception, and their refs report `resolved? == false`. This is §11's "deleted actors degrade, never raise" extended to malformed ids, which is the same failure from the reader's side.               |
+| **Q3** | What `ChangeRequests::Actor` actually provides (§2 names it; §9 never describes it).                    | **Read-side conveniences only, registering nothing.** Registration is `config.actor_type`; a concern that also registered would put the same fact in two places, which is how they drift. M4-4 lists the three methods; the inbox reader waits for M9c to own the scope.                                                                                                                                                                                                                                                                                                          |
+| **Q4** | §11 orders `payload_preview` by "schema order"; §5.12 orders it alphabetically.                         | **Alphabetically, and §11 is corrected.** §5.12 carries the reason — `jsonb` does not preserve insertion order, so alphabetical is the only ordering that is both deterministic and explicable — and §11 states the conclusion without it. There is no schema to order by.                                                                                                                                                                                                                                                                                                        |
+| **Q5** | `as_json` is a documented versioned contract whose keys and value types were never written out (§17.1). | **Written out below.** It closes §17.1's M5 row and is M5-7's input.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Q7** | §6.12 point 6 requires `verify!` to refuse an **unsatisfiable `all_quorums` stage** (§17.1).            | **The only decidable case is checked in M9a-3**: a quorum that names actors, declares no permission rows, and names fewer actors than its threshold. Any other case depends on runtime permission rows, which `verify!` cannot know statically. Closes §17.1's M9a row.                                                                                                                                                                                                                                                                                                           |
 
 ### Q5 — the `as_json` contract
 
@@ -625,14 +636,14 @@ visible in review rather than in an adopter's bug report.
 
 ### Changes these answers make to `PLAN.md`
 
-| Section  | Change                                                                                          | From |
-|----------|-------------------------------------------------------------------------------------------------|------|
-| **§11**  | `payload_preview` is ordered alphabetically, not in "schema order"                                | Q4   |
-| **§9**   | `ChangeRequests::Actor` gets the description it never had                                         | Q3   |
-| **§9.1** | `key_type`'s casting rules, and that an id which will not cast is dropped rather than raising     | Q2   |
-| **§17.1**| The M4 row, the M5 row and the M2/M9a row all close                                               | Q1, Q2, Q5 |
-| **§17**  | M9a's row moves ahead of M4; the "accepted trade" paragraph becomes a record of a trade that was taken and then closed | Q1   |
-| **§7.1** | The divergence note is removed once M9a-2 lands                                                   | Q6   |
+| Section   | Change                                                                                                                 | From           |
+|-----------|------------------------------------------------------------------------------------------------------------------------|----------------|
+| **§11**   | `payload_preview` is ordered alphabetically, not in "schema order"                                                     | Q4             |
+| **§9**    | `ChangeRequests::Actor` gets the description it never had                                                              | Q3             |
+| **§9.1**  | `key_type`'s casting rules, and that an id which will not cast is dropped rather than raising                          | Q2             |
+| **§17.1** | The M4 row, the M5 row, the M2/M9a row and the M9a unsatisfiable row all close                                         | Q1, Q2, Q5, Q7 |
+| **§17**   | M9a's row moves ahead of M4; the "accepted trade" paragraph becomes a record of a trade that was taken and then closed | Q1             |
+| **§7.1**  | The divergence note is removed once M9a-2 lands                                                                        | Q6             |
 
 ---
 
