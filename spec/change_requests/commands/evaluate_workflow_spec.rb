@@ -264,6 +264,162 @@ RSpec.describe ChangeRequests::Commands::EvaluateWorkflow do
     end
   end
 
+  # §7.1: the event belongs in step 1, where the transition happens - not in close_stage!, which is
+  # where it used to be emitted. M9a-2 moved it.
+  describe "when each quorum_satisfied is emitted (§7.1)" do
+    include ActiveSupport::Testing::TimeHelpers
+
+    def two_quorum_stage
+      stage = change_request.stages.sole
+      stage.update_columns(satisfied_by: "all_quorums")
+      stage.quorums.sole.update_columns(name: "admins", threshold: 1)
+      stage.quorums.create!(position: 2, name: "owners", threshold: 2)
+           .permissions.create!(permission: "owner")
+
+      stage
+    end
+
+    def owner(name)
+      Admin.create!(name: name, roles: %w(owner))
+    end
+
+    before { declare(required: 1) }
+
+    it "emits it with the approval that met the quorum, not when the stage closes" do
+      two_quorum_stage
+
+      approve(change_request, approver("Ada"))
+
+      expect(change_request.events.map(&:kind))
+        .to eq(%w(requested approved quorum_satisfied))
+      expect(change_request.reload.current_stage_position).to eq(1)
+    end
+
+    # The whole point: a quorum on a stage that never closes used to get no event at all.
+    it "emits it even though the stage never closes" do
+      two_quorum_stage
+
+      approve(change_request, approver("Ada"))
+      approve(change_request, owner("Olga"))
+
+      expect(change_request.events.where(kind: "quorum_satisfied").map { |e| e.metadata["quorum"] })
+        .to eq(%w(admins))
+      expect(change_request.events.where(kind: "stage_satisfied")).to be_empty
+    end
+
+    it "stamps it with the moment the quorum was met, not the close time" do
+      two_quorum_stage
+      approve(change_request, approver("Ada"))
+      met_at = change_request.events.find_by!(kind: "quorum_satisfied").occurred_at
+
+      travel_to(2.minutes.from_now) do
+        approve(change_request, owner("Olga"))
+        approve(change_request, owner("Omar"))
+      end
+
+      quorum_event = change_request.events.where(kind: "quorum_satisfied").order(:occurred_at).first
+
+      expect(quorum_event.metadata["quorum"]).to eq("admins")
+      expect(quorum_event.occurred_at).to be_within(1.second).of(met_at)
+      # And the stage closed two minutes later, which is the time it used to be stamped with.
+      expect(change_request.events.find_by!(kind: "stage_satisfied").occurred_at)
+        .to be > met_at + 1.minute
+    end
+
+    it "interleaves the events, so the trail reads in the order things happened" do
+      two_quorum_stage
+
+      approve(change_request, approver("Ada"))
+      approve(change_request, owner("Olga"))
+      approve(change_request, owner("Omar"))
+
+      expect(change_request.events.map(&:kind)).to eq(
+        %w(requested approved quorum_satisfied approved approved quorum_satisfied stage_satisfied)
+      )
+    end
+
+    it "still names the closing quorum on stage_satisfied" do
+      two_quorum_stage
+
+      approve(change_request, approver("Ada"))
+      approve(change_request, owner("Olga"))
+      approve(change_request, owner("Omar"))
+
+      expect(change_request.events.find_by!(kind: "stage_satisfied").metadata)
+        .to eq("stage" => "approval", "quorum" => "admins")
+    end
+
+    # A single-quorum stage cannot tell the two timings apart: the approval that meets the quorum is
+    # the one that closes the stage, so the pair still arrives one after the other.
+    it "emits the pair together for a stage of one quorum" do
+      approve(change_request, approver("Ada"))
+
+      expect(change_request.events.map(&:kind))
+        .to eq(%w(requested approved quorum_satisfied stage_satisfied))
+    end
+
+    it "emits nothing for a quorum that never meets its threshold" do
+      two_quorum_stage
+
+      approve(change_request, owner("Olga"))
+
+      expect(change_request.events.where(kind: "quorum_satisfied")).to be_empty
+    end
+  end
+
+  # The withdrawal half of §7.1. No new event kind: the demotion is a status change, and
+  # Commands::Unapprove's own event already names the quorums the withdrawn decision counted toward.
+  # An all_quorums stage that is only half met: the quorum is satisfied while the stage stays open,
+  # which is the only shape in which a satisfied quorum can be withdrawn at all. A single-quorum
+  # stage closes the request in the same breath, and Guards::Unapprove then refuses :not_pending.
+  describe "a quorum that stops being satisfied (§7.1)" do
+    before do
+      declare(required: 1)
+
+      stage = change_request.stages.sole
+      stage.update_columns(satisfied_by: "all_quorums")
+      stage.quorums.sole.update_columns(name: "admins", threshold: 1)
+      stage.quorums.create!(position: 2, name: "owners", threshold: 2)
+           .permissions.create!(permission: "owner")
+    end
+
+    def admins
+      change_request.stages.sole.quorums.find_by!(name: "admins")
+    end
+
+    it "returns it to pending and clears satisfied_at" do
+      first = approver("Ada")
+      approve(change_request, first)
+
+      expect(admins).to have_attributes(status: "satisfied")
+
+      ChangeRequests::Commands::Unapprove.call(request: change_request, actor: first)
+
+      expect(admins).to have_attributes(status: "pending", satisfied_at: nil)
+    end
+
+    it "leaves the withdrawal visible through the unapproved event, not a second quorum event" do
+      first = approver("Ada")
+      approve(change_request, first)
+
+      ChangeRequests::Commands::Unapprove.call(request: change_request, actor: first)
+
+      expect(change_request.events.where(kind: "quorum_satisfied").count).to eq(1)
+      expect(change_request.events.find_by!(kind: "unapproved").metadata)
+        .to include("stage" => "approval", "decision" => "approved", "quorums" => %w(admins))
+    end
+
+    it "emits quorum_satisfied again when the threshold is met a second time" do
+      first = approver("Ada")
+      approve(change_request, first)
+      ChangeRequests::Commands::Unapprove.call(request: change_request, actor: first)
+
+      approve(change_request, approver("Cara"))
+
+      expect(change_request.events.where(kind: "quorum_satisfied").count).to eq(2)
+    end
+  end
+
   describe "rejection" do
     before { declare(required: 2) }
 
