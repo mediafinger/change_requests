@@ -153,17 +153,23 @@ RSpec.describe "the §6.9 workflow shapes" do
         expect(change_request.reload.status).to eq("approved")
       end
 
-      # The known gap, pending rather than absent (Q1, Q10): it reads as "not written yet", and
-      # RSpec reddens it the moment M9a makes it pass.
+      # M9a-1 closed this. It shipped pending from M2-6 and failed for the right reason until the
+      # linking rule landed: an Admin who also holds `owner` used to close both quorums at once.
       it "refuses to close stage one on two people where the shape demands three" do
-        pending "M9a: countable_quorums links an approval to every quorum the actor qualifies for, " \
-                "so an Admin who also holds `owner` closes both quorums of an all_quorums stage " \
-                "(§5.3, §7.1, deferred from M1b-5)"
-
         approve(Admin.create!(name: "Amy", roles: %w(owner)))
         approve(Admin.create!(name: "Abe", roles: %w(owner)))
 
         expect(change_request.reload.current_stage_position).to eq(1)
+      end
+
+      # The same two people, and the third is what closes it - which is what "this really is three
+      # people" has meant since §6.9 was written.
+      it "closes on the third, whoever holds what" do
+        approve(Admin.create!(name: "Amy", roles: %w(owner)))
+        approve(Admin.create!(name: "Abe", roles: %w(owner)))
+        approve(user("Olga", "owner"))
+
+        expect(change_request.reload.current_stage_position).to eq(2)
       end
     end
   end
