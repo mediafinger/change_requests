@@ -116,6 +116,81 @@ RSpec.describe ChangeRequests::Operation do
       expect(operation.problems.size).to eq(3)
     end
 
+    # §6.12 point 6, closing §17.1's M9a row. "Unsatisfiable" is only statically decidable for a
+    # quorum whose eligibility is *closed*: it names its approvers and declares no permission rows,
+    # so the count it names is a ceiling nobody can raise. Under all_quorums every quorum must be
+    # met, so one such quorum makes the whole stage unreachable.
+    describe "an unsatisfiable all_quorums stage" do
+      let(:cfo) { Struct.new(:id, :name).new(1, "Cleo") }
+      let(:counsel) { Struct.new(:id, :name).new(2, "Gene") }
+
+      def workflow(satisfied_by:, threshold:, named:, permissions: nil)
+        operation.version = "2026-09-13"
+        operation.service = "Members::UpdateRoles"
+        operation.workflow do |w|
+          w.stage :approval, satisfied_by: satisfied_by do |q|
+            q.quorum :named, eligible_actors: named, permissions: permissions, threshold: threshold
+            q.quorum :other, permissions: %w(owner), threshold: 1
+          end
+        end
+      end
+
+      it "reports a quorum that names fewer approvers than its threshold" do
+        workflow(satisfied_by: :all_quorums, threshold: 2, named: [cfo])
+
+        expect(operation.problems.join).to include("quorum :named names 1 approver and needs 2")
+      end
+
+      it "says why it can never be satisfied, not merely that it is not" do
+        workflow(satisfied_by: :all_quorums, threshold: 3, named: [cfo, counsel])
+
+        expect(operation.problems.join).to include("declares no permissions")
+      end
+
+      it "accepts a quorum that names exactly its threshold" do
+        workflow(satisfied_by: :all_quorums, threshold: 2, named: [cfo, counsel])
+
+        expect(operation.problems).to be_empty
+      end
+
+      it "accepts a quorum that names more than its threshold" do
+        workflow(satisfied_by: :all_quorums, threshold: 1, named: [cfo, counsel])
+
+        expect(operation.problems).to be_empty
+      end
+
+      # Eligibility is open again the moment a permission row is there: a host can grant it to
+      # anyone, so nothing about the declaration bounds the count (§5.3).
+      it "accepts a quorum that also declares permissions, whatever it names" do
+        workflow(satisfied_by: :all_quorums, threshold: 5, named: [cfo], permissions: %w(director))
+
+        expect(operation.problems).to be_empty
+      end
+
+      # Under any_quorum the other quorums are alternative routes, so one unreachable rule does not
+      # make the stage unreachable. §6.12 scopes the check to all_quorums for that reason.
+      it "leaves an any_quorum stage alone, where another quorum can carry it" do
+        workflow(satisfied_by: :any_quorum, threshold: 2, named: [cfo])
+
+        expect(operation.problems).to be_empty
+      end
+
+      it "refuses it at declaration, where the mistake was made" do
+        expect do
+          ChangeRequests.operations.define("orders.pay") do |op|
+            op.version = "2026-09-13"
+            op.service = "Orders::Pay"
+            op.workflow do |w|
+              w.stage :approval, satisfied_by: :all_quorums do |q|
+                q.quorum :named, eligible_actors: [cfo], threshold: 2
+                q.quorum :other, permissions: %w(owner), threshold: 1
+              end
+            end
+          end
+        end.to raise_error(ChangeRequests::ConfigurationError, /names 1 approver and needs 2/)
+      end
+    end
+
     # Resolving the constant needs the host's classes loaded, so it runs at boot and nowhere else.
     it "says nothing about the target, which only verify! resolves" do
       complete!

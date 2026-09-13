@@ -84,7 +84,7 @@ module ChangeRequests
     # so none of them can disagree about what a complete declaration is (§7.2 †, §6.12 point 6).
     def problems
       [version_problem, service_problem, method_name_problem, workflow_problem,
-       *threshold_problems].compact
+       *threshold_problems, *unsatisfiable_problems].compact
     end
 
     # What needs the host's classes loaded, so it runs at boot and nowhere else: the §6.12 target
@@ -149,6 +149,33 @@ module ChangeRequests
 
       "#{describe(stage, quorum)} has threshold #{quorum.threshold.inspect}. " \
         "One approval is the minimum, not zero (§5.3)."
+    end
+
+    # §6.12 point 6: no `all_quorums` stage is unsatisfiable. Only one shape of that is decidable
+    # from a declaration, and this is it - eligibility stops being statically knowable the moment a
+    # permission row is involved, because who holds a permission is a host runtime question.
+    #
+    # A quorum is **eligibility-closed** when it names its approvers and declares no permission
+    # rows: the number it names is then a ceiling nobody can raise. Under `all_quorums` every
+    # quorum must be met, so one closed quorum that names fewer actors than its threshold makes the
+    # whole stage unreachable. Under `any_quorum` the others are alternative routes, so it does
+    # not - which is why §6.12 scopes the check the way it does.
+    def unsatisfiable_problems
+      workflow.stages.select { |stage| stage.satisfied_by.to_sym == :all_quorums }
+              .flat_map { |stage| stage.quorums.filter_map { |quorum| unsatisfiable_problem(stage, quorum) } }
+    end
+
+    def unsatisfiable_problem(stage, quorum)
+      return unless quorum.permissions.empty?
+
+      named = quorum.eligible_actors.size
+
+      return if named.zero? # a quorum qualifying nobody at all is refused at declaration (§5.3)
+      return if named >= quorum.threshold
+
+      "#{describe(stage, quorum)} names #{named} #{"approver".pluralize(named)} and needs " \
+        "#{quorum.threshold}. It declares no permissions, so nobody else can ever satisfy it, and " \
+        "every quorum of an all_quorums stage must be met (§5.3, §6.12)."
     end
 
     def describe(stage, quorum)

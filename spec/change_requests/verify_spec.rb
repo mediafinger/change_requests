@@ -191,6 +191,25 @@ RSpec.describe "ChangeRequests.operations.verify! (§6.12 point 6)" do
       expect(operations.problems.join).to include("version")
     end
 
+    # §6.12 point 6, and the last of its five checks to be built (§17.1).
+    it "refuses an all_quorums stage whose named quorum can never reach its threshold" do
+      define.instance_variable_set(:@workflow, unsatisfiable_workflow)
+
+      expect(operations.problems.join).to include("names 1 approver and needs 2")
+    end
+
+    def unsatisfiable_workflow
+      named = ChangeRequests::Workflow::Quorum.new(
+        name: "named", position: 1, threshold: 2, permission_match: :any,
+        permissions: [], eligible_actors: [Struct.new(:id).new(1)]
+      )
+
+      ChangeRequests::Workflow.new(
+        [ChangeRequests::Workflow::Stage.new(name: "approval", position: 1,
+                                             satisfied_by: :all_quorums, quorums: [named])]
+      )
+    end
+
     it "refuses a quorum whose threshold is not positive" do
       define.instance_variable_set(:@workflow, workflow_with_threshold(0))
 

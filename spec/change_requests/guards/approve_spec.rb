@@ -308,6 +308,75 @@ RSpec.describe ChangeRequests::Guards::Approve do
       end
     end
 
+    # §5.3: named approvers are OR-ed with the permission rows, and the linking rule sees the union.
+    # A named actor is eligible in exactly the way a permission-holder is, and must land in exactly
+    # one quorum of an all_quorums stage for the same reason (§6.9d).
+    context "with named approvers" do
+      let(:actor) { Admin.create!(name: "Cleo") }
+
+      # Threshold one apiece: a quorum naming its approvers and declaring no permissions cannot
+      # need more of them than it names, or `verify!` refuses the declaration outright (§6.12).
+      def declare_named(satisfied_by, named)
+        ChangeRequests.operations["members.update_roles"].workflow do |w|
+          w.stage :approval, satisfied_by: satisfied_by do |q|
+            q.quorum :board,   eligible_actors: named, threshold: 1
+            q.quorum :finance, eligible_actors: named, threshold: 1
+          end
+        end
+      end
+
+      it "makes a named actor eligible with no permission at all" do
+        declare_named(:all_quorums, [actor])
+
+        expect(actor.roles).to be_empty
+        expect(guard.eligible_quorums.map(&:name)).to match_array(%w(board finance))
+      end
+
+      it "links a named actor to exactly one quorum of an all_quorums stage" do
+        declare_named(:all_quorums, [actor])
+
+        expect(guard.countable_quorums.map(&:name)).to eq(%w(board))
+      end
+
+      it "links a named actor to every quorum of an any_quorum stage" do
+        declare_named(:any_quorum, [actor])
+
+        expect(guard.countable_quorums.map(&:name)).to match_array(%w(board finance))
+      end
+
+      # §5.3's OR: a quorum carrying both rows admits an actor who satisfies either, and counts
+      # them once - the union is a set, not a sum.
+      it "counts an actor who qualifies by name and by permission only once" do
+        ChangeRequests.operations["members.update_roles"].workflow do |w|
+          w.stage :approval, satisfied_by: :all_quorums do |q|
+            q.quorum :mixed, permissions: %w(member_admin), eligible_actors: [actor], threshold: 2
+            q.quorum :other, permissions: %w(member_admin),                           threshold: 2
+          end
+        end
+        actor.update!(roles: %w(member_admin))
+
+        expect(guard.eligible_quorums.map(&:name)).to match_array(%w(mixed other))
+        expect(guard.countable_quorums.map(&:name)).to eq(%w(mixed))
+      end
+
+      it "admits an actor named on a mixed quorum who holds none of its permissions" do
+        ChangeRequests.operations["members.update_roles"].workflow do |w|
+          w.stage(:approval) do |q|
+            q.quorum :mixed, permissions: %w(nobody_has_this),
+                                             eligible_actors: [actor], threshold: 1
+          end
+        end
+
+        expect(guard).to be_allowed
+      end
+
+      it "refuses an actor who is named on nothing and holds nothing" do
+        declare_named(:all_quorums, [Admin.create!(name: "Someone else")])
+
+        expect(guard.reason).to eq(:not_permitted)
+      end
+    end
+
     # A stage of one quorum cannot tell the two rules apart, and must behave identically either way.
     context "with a single-quorum stage" do
       it "links to it under all_quorums" do
