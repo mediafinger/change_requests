@@ -73,6 +73,13 @@ module ChangeRequests
 
       # Counting is only via change_request_approval_quorums, written at decision time and never
       # re-derived: a later role change must not silently un-approve a request (§5.3).
+      # Step 1, and where `quorum_satisfied` is emitted: the event belongs at the transition, so a
+      # quorum met by an earlier approval is stamped with that moment rather than the close time,
+      # and a quorum on a stage that never closes still says it was met (§7.1).
+      #
+      # The demotion emits nothing. It is reachable only through `Commands::Unapprove`, whose own
+      # event already names the quorums the withdrawn decision counted toward - a second kind would
+      # say the same thing twice.
       def satisfy_quorums
         stage.quorums.each do |quorum|
           met = quorum.approval_quorums.count >= quorum.threshold
@@ -80,6 +87,8 @@ module ChangeRequests
           next if met == quorum.satisfied?
 
           quorum.update!(status: met ? "satisfied" : "pending", satisfied_at: met ? Time.current : nil)
+
+          emit(:quorum_satisfied, metadata: quorum_metadata(quorum)) if met
         end
       end
 
@@ -94,13 +103,10 @@ module ChangeRequests
         stage.all_quorums? ? quorums.all?(&:satisfied?) : quorums.any?(&:satisfied?)
       end
 
-      # §7.1's four writes. Cooldown is M9b, so the window is always zero here and a satisfied stage
-      # closes in the same breath.
+      # §7.1's writes. Cooldown is M9b, so the window is always zero here and a satisfied stage
+      # closes in the same breath. The `quorum_satisfied` events are already in the trail by now,
+      # each emitted by step 1 when its quorum was actually met.
       def close_stage!
-        stage.quorums.select(&:satisfied?).each do |quorum|
-          emit(:quorum_satisfied, metadata: quorum_metadata(quorum))
-        end
-
         stage.update!(status: "closed", closed_at: Time.current)
         emit(:stage_satisfied, metadata: quorum_metadata(closing_quorum))
 
