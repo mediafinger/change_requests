@@ -516,6 +516,7 @@ twice leaves the same data.
 
   ```ruby
   it_behaves_like "a change requests index view", path: admin_change_requests_path
+  it_behaves_like "a change requests show view", path: admin_change_request_path(request)
   it_behaves_like "a change requests row partial", partial: "admin/change_requests/row"
   ```
 

@@ -15,10 +15,10 @@ decision already taken.
 
 ## 1. Scope
 
-| Milestone | Version | What it is                                                                                   | Spec        |
-|-----------|---------|-----------------------------------------------------------------------------------------------|-------------|
-| **M9b**   |         | `op.cooldown` over satisfaction **and** rejection, `CloseStageJob`, `close_due_stages!`, unapproval inside the window | §7.1        |
-| **M9c**   | 0.10.0  | `Request.awaiting_approval_from`, the guard/scope equivalence spec, and the inbox in the UI   | §5.3, §11   |
+| Milestone | Version | What it is                                                                                                            | Spec      |
+|-----------|---------|-----------------------------------------------------------------------------------------------------------------------|-----------|
+| **M9b**   |         | `op.cooldown` over satisfaction **and** rejection, `CloseStageJob`, `close_due_stages!`, unapproval inside the window | §7.1      |
+| **M9c**   | 0.10.0  | `Request.awaiting_approval_from`, the guard/scope equivalence spec, and the inbox in the UI                           | §5.3, §11 |
 
 Everything here is an **addition**. Unlike M9a, neither milestone fixes something that already ships
 wrong: `op.cooldown` has never existed, and there has never been an inbox.
@@ -45,13 +45,13 @@ wrong: `op.cooldown` has never existed, and there has never been an inbox.
 
 **Declared but read by nothing:**
 
-| Surface                                    | Declared in                   | Consumed by |
-|--------------------------------------------|-------------------------------|-------------|
-| `op.cooldown`                              | §6.4, §7.1; **no attribute**  | M9b-1       |
-| `Stage#rejected_at`                        | the migration, §5.2           | M9b-3       |
-| `Maintenance.close_due_stages!`            | §8, and M3b-2 named it as M9b's | M9b-5     |
-| `Request.awaiting_approval_from`           | §5.3, §11, §14.4              | M9c-1       |
-| `Testing` matcher `be_awaiting_approval_from` | `Plan_M7.md` M8-3, shipped pending | M9c-1 |
+| Surface                                       | Declared in                        | Consumed by |
+|-----------------------------------------------|------------------------------------|-------------|
+| `op.cooldown`                                 | §6.4, §7.1; **no attribute**       | M9b-1       |
+| `Stage#rejected_at`                           | the migration, §5.2                | M9b-3       |
+| `Maintenance.close_due_stages!`               | §8, and M3b-2 named it as M9b's    | M9b-5       |
+| `Request.awaiting_approval_from`              | §5.3, §11, §14.4                   | M9c-1       |
+| `Testing` matcher `be_awaiting_approval_from` | `Plan_M7.md` M8-3, shipped pending | M9c-1       |
 
 ---
 
@@ -184,7 +184,7 @@ gains it.
 
 ### M9c-1 — `Request.awaiting_approval_from`
 **Spec:** §5.3, §11, §14.4
-**Depends on:** M9a-1 (shipped ahead of M4)
+**Depends on:** M9a-1, M4-3
 
 **Deliver** the approver inbox as **an indexed, paginatable scope** — not a Ruby filter over every open
 request:
@@ -245,17 +245,17 @@ applied.
 
 **Two raised, two answered.** M9a's own question moved to `Plan_M4.md` with its tickets.
 
-| ID     | Question                                                                 | Answer                                                                                                                                                                                                                                                       |
-|--------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ID     | Question                                                                                      | Answer                                                                                                                                                                                                                                                                                                                                                                |
+|--------|-----------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Q1** | Is `cooldown` snapshotted onto the request at creation, like `max_attempts` and `expires_at`? | **No, read live.** `max_attempts` and `expires_at` are snapshotted because they bound a request's own lifetime and must not move under it. A cooldown is a *reversibility window on a decision that has not happened yet*, and a host shortening it should see the change take effect. §6.12 point 4's frozen snapshot covers the approval policy, which this is not. |
-| **Q2** | `Plan_M6.md` asks whether the index needs `awaiting_approval_from` before M9c. | **No — M9c-3 adds it, and M6a ships without it.** Pulling the scope forward means writing M9c-1 during M6, which is the ticket in this milestone with real SQL in it. The cost is that the index ships for two milestones without the filter most users want, and that is worth saying in `docs/06` rather than hiding. |
+| **Q2** | `Plan_M6.md` asks whether the index needs `awaiting_approval_from` before M9c.                | **No — M9c-3 adds it, and M6a ships without it.** Pulling the scope forward means writing M9c-1 during M6, which is the ticket in this milestone with real SQL in it. The cost is that the index ships for two milestones without the filter most users want, and that is worth saying in `docs/06` rather than hiding.                                               |
 
 ### Changes these answers make to `PLAN.md`
 
-| Section  | Change                                                          | From |
-|----------|------------------------------------------------------------------|------|
-| **§6.4** | The "not built yet" callout on `op.cooldown` is removed          | M9b-1 |
-| **§6.12**| Point 6's cooldown/ActiveJob check is built                      | M9b-1 |
+| Section   | Change                                                  | From  |
+|-----------|---------------------------------------------------------|-------|
+| **§6.4**  | The "not built yet" callout on `op.cooldown` is removed | M9b-1 |
+| **§6.12** | Point 6's cooldown/ActiveJob check is built             | M9b-1 |
 
 ---
 
