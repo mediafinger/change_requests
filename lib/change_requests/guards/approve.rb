@@ -24,11 +24,21 @@ module ChangeRequests
         nil
       end
 
-      # The subset an approval actually links to. Equal in M1; M9a makes it a strict subset under
-      # all_quorums, where an approval links to exactly one quorum - the lowest-position one the
-      # actor qualifies for - so one person cannot close two quorums that must both be met (§5.3).
+      # The subset an approval actually links to (§5.3, §7.1).
+      #
+      # Under `any_quorum` the quorums are alternative routes to the same gate, so an approval
+      # counts toward every one the actor qualifies for. Under `all_quorums` they are all required,
+      # and an approval counts toward **exactly one** - otherwise a stage declared "one Admin AND
+      # two Owners" closes on two people, which is what its own prose says it must not do.
+      #
+      # The lowest position wins, and position is declaration order: a host reads their own
+      # declaration top to bottom and knows where an approval will land. `eligible_quorums` is
+      # already scoped to pending ones, so a quorum that is full is never the candidate and the
+      # next approval goes where there is still room.
       def countable_quorums
-        eligible_quorums
+        return eligible_quorums unless stage&.all_quorums?
+
+        Array(eligible_quorums.min_by(&:position))
       end
     end
   end

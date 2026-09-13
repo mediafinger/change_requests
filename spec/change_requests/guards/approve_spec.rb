@@ -249,12 +249,70 @@ RSpec.describe ChangeRequests::Guards::Approve do
     end
   end
 
-  # M9a makes this a strict subset: under all_quorums an approval links to exactly one quorum, the
-  # lowest-position one the actor qualifies for, so one person cannot close two quorums that must
-  # both be met (§5.3).
+  # §5.3, §7.1: the subset an approval actually links to. Under all_quorums it is a *strict* subset -
+  # exactly one quorum - which is what stops one person closing two quorums that must both be met.
   describe "#countable_quorums" do
-    it "is every eligible quorum in M1" do
-      expect(guard.countable_quorums).to eq(guard.eligible_quorums)
+    let(:actor) { Admin.create!(name: "Ada", roles: %w(member_admin owner finance)) }
+
+    def declare(satisfied_by)
+      ChangeRequests.operations["members.update_roles"].workflow do |w|
+        w.stage :approval, satisfied_by: satisfied_by do |q|
+          q.quorum :admins,  permissions: %w(member_admin), threshold: 2
+          q.quorum :owners,  permissions: %w(owner),        threshold: 2
+          q.quorum :finance, permissions: %w(finance),      threshold: 2
+        end
+      end
+    end
+
+    def quorum(name)
+      change_request.stages.sole.quorums.find_by!(name: name)
+    end
+
+    context "under any_quorum" do
+      before { declare(:any_quorum) }
+
+      it "links to every quorum the actor qualifies for - the alternatives are alternatives" do
+        expect(guard.countable_quorums).to match_array(guard.eligible_quorums)
+        expect(guard.countable_quorums.map(&:name)).to match_array(%w(admins owners finance))
+      end
+    end
+
+    context "under all_quorums" do
+      before { declare(:all_quorums) }
+
+      it "links to exactly one, however many the actor qualifies for" do
+        expect(guard.eligible_quorums.size).to eq(3)
+        expect(guard.countable_quorums.size).to eq(1)
+      end
+
+      it "picks the lowest position, which is declaration order (§5.3)" do
+        expect(guard.countable_quorums.map(&:name)).to eq(%w(admins))
+      end
+
+      it "is a strict subset of the quorums that made the actor eligible" do
+        expect(guard.eligible_quorums).to include(*guard.countable_quorums)
+      end
+
+      # eligible_quorums is already scoped to pending ones, so a closed quorum is never the
+      # lowest-position candidate and the next approval lands where there is still room.
+      it "skips a quorum that is already satisfied" do
+        quorum("admins").update!(status: "satisfied", satisfied_at: Time.current)
+
+        expect(guard.countable_quorums.map(&:name)).to eq(%w(owners))
+      end
+
+      it "links to nothing when every quorum it qualifies for is satisfied" do
+        change_request.stages.sole.quorums.update_all(status: "satisfied")
+
+        expect(guard.countable_quorums).to be_empty
+      end
+    end
+
+    # A stage of one quorum cannot tell the two rules apart, and must behave identically either way.
+    context "with a single-quorum stage" do
+      it "links to it under all_quorums" do
+        expect(guard.countable_quorums.size).to eq(1)
+      end
     end
   end
 end
