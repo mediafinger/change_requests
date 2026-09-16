@@ -73,5 +73,35 @@ RSpec.describe ChangeRequests::Translation do
       expect(described_class.translate("change_requests.errors.nothing_defines_this", default: "fallback"))
         .to eq("fallback")
     end
+
+    it "returns a default holding a bare % untouched when there is nothing to interpolate" do
+      hide_const("I18n")
+
+      expect(described_class.translate("change_requests.nothing", default: "100% sure")).to eq("100% sure")
+    end
+
+    describe "interpolation" do
+      it "interpolates into a translation" do
+        with_translations("change_requests.statuses.expired_tooltip" => "Ran out at %{expires_at}")
+
+        expect(described_class.translate("change_requests.statuses.expired_tooltip",
+                                         default: "Expired at %{expires_at}", expires_at: "noon"))
+          .to eq("Ran out at noon")
+      end
+
+      it "interpolates into the default when nothing defines the key" do
+        expect(described_class.translate("change_requests.nothing", default: "Expired at %{expires_at}",
+                                                                    expires_at: "noon"))
+          .to eq("Expired at noon")
+      end
+
+      it "interpolates into the default when I18n is not there at all" do
+        hide_const("I18n")
+
+        expect(described_class.translate("change_requests.nothing", default: "Expired at %{expires_at}",
+                                                                    expires_at: "noon"))
+          .to eq("Expired at noon")
+      end
+    end
   end
 end

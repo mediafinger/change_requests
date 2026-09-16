@@ -20,12 +20,15 @@ module ChangeRequests
 
     # `record:` is what M4-2's batch loading injects: a collection resolves every ref of a page in
     # one query per actor type and hands each one its answer, so nothing resolves itself.
-    def initialize(type:, id:, record: UNRESOLVED, **columns)
-      @type     = type&.to_s
-      @id       = id&.to_s
-      @snapshot = columns[:label]
-      @identity = columns[:identity]
-      @record   = record
+    #
+    # `resolve: false` never touches a host table: see #without_resolution.
+    def initialize(type:, id:, record: UNRESOLVED, resolve: true, **columns)
+      @type      = type&.to_s
+      @id        = id&.to_s
+      @snapshot  = columns[:label]
+      @identity  = columns[:identity]
+      @resolving = resolve
+      @record    = resolve ? record : nil
 
       # Only the keys this reference actually carries, so `to_h` is what the reader returned before
       # ActorRef existed: an eligibility row has no label, and only two references have an identity.
@@ -54,6 +57,16 @@ module ChangeRequests
 
     # `ActorResolver`'s seam: a page resolves every ref in one query per actor type and hands each
     # one its answer, so nothing resolves itself (§11).
+    # §11's `resolve_actors: false`: the same triple, answered from the row alone under either label
+    # strategy. `deleted?` is false, because nobody looked.
+    def without_resolution
+      self.class.new(type: type, id: id, resolve: false, **@columns)
+    end
+
+    def resolving?
+      @resolving
+    end
+
     def resolve_with(record)
       @record = record
 
@@ -65,7 +78,7 @@ module ChangeRequests
     end
 
     def deleted?
-      !resolved?
+      resolving? && !resolved?
     end
 
     # Nil whenever there is no record or the type declares no `path` lambda - which includes every

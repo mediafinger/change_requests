@@ -27,9 +27,14 @@ module ChangeRequests
       # Defaults to `Klass.where(id: ids)` derived from the registered name, and **resolves the
       # class at call time**: a reloading application redefines it, and holding one here would be
       # the mistake ADR-0025 records about services. A name that no longer resolves finds nothing,
-      # which is not an error - the labels are on the rows already.
+      # which is not an error - the labels are on the rows already. Nor is a class with no `where`:
+      # a plain Ruby actor needs its own finder to resolve, and without one it degrades.
       def finder
-        @finder || ->(ids) { model&.where(id: ids) || [] }
+        @finder || lambda { |ids|
+          klass = model
+
+          klass.respond_to?(:where) ? klass.where(id: ids) : []
+        }
       end
 
       def model

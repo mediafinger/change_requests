@@ -32,6 +32,9 @@ module ChangeRequests
     # reference across a reload, and so a headless host can name one it has not loaded.
     attr_accessor :execution_mode, :job_class, :job_queue
 
+    # Presentation (§5.12, §10). The renderer takes `(request, view)`, so views call it, not presenters.
+    attr_accessor :payload_preview_limit, :payload_renderer
+
     def initialize
       @actor_types  = {}
       @tenant_types = {}
@@ -56,6 +59,9 @@ module ChangeRequests
       @execution_mode = :inline
       @job_class      = "ChangeRequests::Execution::Job"
       @job_queue      = :default
+
+      @payload_preview_limit = 3
+      @payload_renderer      = nil
     end
 
     # Defaults to tenant scoping when the gem can work out an actor's tenant, and to the identity
@@ -112,6 +118,8 @@ module ChangeRequests
         execution_mode_problem,
         job_class_problem,
         job_queue_problem,
+        payload_preview_limit_problem,
+        payload_renderer_problem,
         *actor_types.values.flat_map(&:problems),
         *tenant_types.values.flat_map(&:problems),
       ].compact
@@ -178,6 +186,21 @@ module ChangeRequests
       return unless job_queue.nil? || job_queue.to_s.strip.empty?
 
       "config.job_queue is #{job_queue.inspect}. Expected a queue name (§10)."
+    end
+
+    def payload_preview_limit_problem
+      return if payload_preview_limit.is_a?(Integer) && !payload_preview_limit.negative?
+
+      "config.payload_preview_limit is #{payload_preview_limit.inspect}. Expected an integer of 0 or " \
+        "more; 0 hides the preview (§5.12)."
+    end
+
+    def payload_renderer_problem
+      return if payload_renderer.nil? || callable_with?(payload_renderer, 2)
+
+      "config.payload_renderer is #{payload_renderer.inspect}. Expected nil, or something callable " \
+        "taking the request and the view, such as " \
+        "`->(request, view) { view.render \"admin/payload\", request: }` (§10)."
     end
 
     def default_visible_scope
