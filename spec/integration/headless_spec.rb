@@ -34,6 +34,24 @@ RSpec.describe "the domain core, headless" do
     expect(probe).to include("error_message=requester")
   end
 
+  # §11: presenters are domain core - no view, no routes, a non-ActiveRecord actor class.
+  describe "RequestPresenter" do
+    it "presents status, operation and payload preview" do
+      expect(probe).to include("presenter_status=approved/primary",
+                               "presenter_operation=Members::UpdateRoles.call",
+                               'presenter_preview=Member=7,Roles=["editor"]')
+    end
+
+    it "labels actors from the row with resolve_actors: false" do
+      expect(probe).to include("presenter_requester=Ada Lovelace")
+    end
+
+    # A HeadlessActor has no `where` and registers no finder, so it cannot resolve - and must not raise.
+    it "degrades with resolve_actors: true when the actor class cannot be found" do
+      expect(probe).to include("presenter_resolving=Ada Lovelace/deleted=true")
+    end
+  end
+
   it "talks to PostgreSQL over a bare ActiveRecord connection" do
     expect(probe).to include("adapter=PostgreSQL")
   end

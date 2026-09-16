@@ -130,6 +130,20 @@ ChangeRequests::Commands::Approve.call(request: request.reload, actor: second)
 report :after_two, request.reload.status
 report :stage_after_two, request.stages.sole.reload.status
 
+# §11: presenters are domain core. No view, no routes, and an actor class that is not ActiveRecord.
+presenter = ChangeRequests::RequestPresenter.new(request.reload, actor: first, resolve_actors: false)
+report :presenter_status, "#{presenter.status.key}/#{presenter.status.tone}"
+report :presenter_operation, presenter.operation_label
+report :presenter_preview, presenter.payload_preview.map { |field| "#{field.label}=#{field.value}" }.join(",")
+report :presenter_requester, presenter.requester.label
+
+begin
+  resolving = ChangeRequests::RequestPresenter.new(request, actor: first)
+  report :presenter_resolving, "#{resolving.requester.label}/deleted=#{resolving.requester.deleted?}"
+rescue StandardError => e
+  report :presenter_resolving, "raised #{e.class}"
+end
+
 report :events, request.reload.events.count
 report :event_kinds, request.events.order(:occurred_at).map(&:kind).join(",")
 report :event_actor, request.events.find_by(kind: "approved").actor_label
