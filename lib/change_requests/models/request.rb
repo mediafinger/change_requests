@@ -61,14 +61,30 @@ module ChangeRequests
       where(status: "executing").where(id: claimed.select(:change_request_id))
     }
 
+    # §5.11's operation-key test, and its inverse, written from one place. `visible_to` hides
+    # exactly what has no live declaration and `undeclared` sweeps exactly that, so the two must
+    # never both contain a row - which an empty registry is the case that would break. Rails
+    # renders `IN ()` as `1=0` and `NOT IN ()` as `1=1`, so the pair stays correct with nothing
+    # declared at all: everything open is undeclared, and nothing is visible.
+    scope :with_declared_operation, -> { where(operation_key: ChangeRequests.operations.keys) }
+    scope :with_undeclared_operation, -> { where.not(operation_key: ChangeRequests.operations.keys) }
+
     # What Maintenance.cancel_undeclared! sweeps (§5.11). `executing` is excluded deliberately:
     # Guards::Cancel refuses a request mid-flight, and being undeclared does not make it
     # recallable - the reaper is what clears those.
     scope :undeclared, lambda {
-      declared = ChangeRequests.operations.keys
-      candidates = where(status: OPEN_STATUSES - %w(executing))
+      where(status: OPEN_STATUSES - %w(executing)).with_undeclared_operation
+    }
 
-      declared.empty? ? candidates : candidates.where.not(operation_key: declared)
+    # What an actor may see (§9.3). Two rules, in this order: a request whose operation is no
+    # longer declared is **invisible to everyone** - it leaves inboxes and badges the moment the
+    # declaration goes, before any cleanup runs (§5.11) - and then the host's own visibility rule
+    # narrows what is left.
+    #
+    # The engine applies it to **show as well as index**, so a cross-tenant show is a 404 rather
+    # than a 403: a 403 confirms the row exists, which is what tenant scoping is hiding.
+    scope :visible_to, lambda { |actor|
+      ChangeRequests.config.visible_scope.call(with_declared_operation, actor)
     }
 
     def current_stage

@@ -12,6 +12,11 @@ module ChangeRequests
     attr_reader :actor_types, :tenant_types
     attr_accessor :actor_label_strategy, :actor_identity
 
+    # Tenancy and visibility (§9.3). Both optional, both written against the `tenant_type` and
+    # `tenant_id` string columns rather than a foreign key.
+    attr_accessor :tenant_for
+    attr_writer :visible_scope
+
     # Authorization (§9.2)
     attr_reader :authorization
     # The default only; every quorum carries its own (§5.3).
@@ -34,6 +39,9 @@ module ChangeRequests
       @actor_label_strategy = :live
       @actor_identity       = nil
 
+      @tenant_for    = nil
+      @visible_scope = nil
+
       @authorization            = Authorization::Permissions.new
       @default_permission_match = :any
 
@@ -48,6 +56,18 @@ module ChangeRequests
       @execution_mode = :inline
       @job_class      = "ChangeRequests::Execution::Job"
       @job_queue      = :default
+    end
+
+    # Defaults to tenant scoping when the gem can work out an actor's tenant, and to the identity
+    # scope otherwise (§9.3).
+    #
+    # **`tenant_for` is what makes the default scope anything.** A host that registers a
+    # `tenant_type` only to *record* the tenant - passing `tenant:` explicitly and never wanting
+    # visibility narrowed - gets the identity scope, which is what not telling the gem how to find
+    # an actor's tenant asks for. A host that wants scoping sets `tenant_for`, or replaces this
+    # entirely.
+    def visible_scope
+      @visible_scope || default_visible_scope
     end
 
     # §9.2 tells hosts to assign a bare lambda; the gem needs one object answering `allows?`.
@@ -87,6 +107,8 @@ module ChangeRequests
         actor_identity_problem,
         authorization_problem,
         max_attempts_problem,
+        tenant_for_problem,
+        visible_scope_problem,
         execution_mode_problem,
         job_class_problem,
         job_queue_problem,
@@ -156,6 +178,44 @@ module ChangeRequests
       return unless job_queue.nil? || job_queue.to_s.strip.empty?
 
       "config.job_queue is #{job_queue.inspect}. Expected a queue name (§10)."
+    end
+
+    def default_visible_scope
+      return ->(scope, _actor) { scope } if tenant_for.nil?
+
+      lambda do |scope, actor|
+        tenant = tenant_for.call(actor)
+
+        next scope.none if tenant.nil?
+
+        reference = ChangeRequests.actor_attributes(tenant, registry: :tenant_types)
+
+        scope.where(tenant_type: reference[:type], tenant_id: reference[:id])
+      end
+    end
+
+    def tenant_for_problem
+      return if tenant_for.nil? || callable_with?(tenant_for, 1)
+
+      "config.tenant_for is #{tenant_for.inspect}. Expected nil, or something callable taking the " \
+        "actor, such as `->(actor) { actor.organization }` (§9.3)."
+    end
+
+    def visible_scope_problem
+      return if @visible_scope.nil? || callable_with?(@visible_scope, 2)
+
+      "config.visible_scope is #{@visible_scope.inspect}. Expected nil, or something callable " \
+        "taking the scope and the actor, such as " \
+        "`->(scope, actor) { scope.where(tenant_id: actor.organization_id.to_s) }` (§9.3)."
+    end
+
+    # A lambda's arity is exact and a method object's may be negative for splats, which is a
+    # host's business rather than ours - only a definite mismatch is a problem.
+    def callable_with?(subject, count)
+      return false unless subject.respond_to?(:call)
+      return true unless subject.respond_to?(:arity)
+
+      subject.arity.negative? || subject.arity == count
     end
 
     def actor_identity_problem

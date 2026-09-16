@@ -98,10 +98,16 @@ module ChangeRequests
           payload: validated_payload,
           payload_labels: labels,
           requester: requester,
-          tenant: tenant,
+          tenant: tenant_reference,
           max_attempts: declaration.max_attempts,
           expires_at: expires_at(declaration)
         )
+      end
+
+      # An explicit `tenant:` always wins; `config.tenant_for` fills in what a caller did not pass,
+      # so a host with one tenant per actor stops threading it through every call site (§9.3).
+      def tenant_reference
+        tenant || config.tenant_for&.call(requester)
       end
 
       # The gem validates only that it is a JSON object; matching it to the target's signature is
