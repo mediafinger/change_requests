@@ -61,4 +61,6 @@ en:
     #
     # Presenter values label the same way (§11), each under its own key: `fields.<payload key>`,
     # `statuses.<status>`, `actions.<action>` and `timeline.<event kind>`. `timeline` rather than
-    # `events`, which holds the bodies above.
+    # `events`, which holds the bodies above. Two status tooltips interpolate:
+    # `statuses.expired_tooltip` (%{expires_at}) and `statuses.overridden_tooltip`
+    # (%{present}, %{required}, %{reason}). See docs/06_views_and_theming.md.

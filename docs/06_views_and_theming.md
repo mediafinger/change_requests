@@ -1,0 +1,98 @@
+# Views and theming
+
+Everything the built-in UI renders comes from a presenter. Presenters need no view layer, so an API
+controller, a mailer or a background job renders a request from the same values the UI does.
+
+## Presenters
+
+```ruby
+p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: nil, resolve_actors: true)
+```
+
+| Method              | Returns                                                                  |
+|---------------------|--------------------------------------------------------------------------|
+| `operation_key`     | `"members.update_roles"`                                                 |
+| `operation_version` | the version the request was created under                                |
+| `operation_label`   | `"Members::UpdateRoles.call"`, from the request's own columns            |
+| `requester`         | `ChangeRequests::ActorRef`                                               |
+| `executer`          | `ActorRef`, or `nil` until someone executes it                           |
+| `tenant`            | `ActorRef`, or `nil`                                                     |
+| `status`            | `Value::Status(key:, label:, tone:, tooltip:)`                           |
+| `payload_fields`    | `[Value::Field(key:, label:, value:)]`, alphabetical by key              |
+| `payload_preview`   | the first `config.payload_preview_limit` of `payload_fields`             |
+
+Stages, actions, the timeline and `as_json` arrive with the rest of M5.
+
+A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
+declaration.
+
+### Actors
+
+`requester`, `executer` and `tenant` resolve together on first read: one query per actor class, then none.
+A deleted actor never raises. `deleted?` is true, `label` falls back to the label snapshotted when the
+row was written, and `path` is `nil`.
+
+`resolve_actors: false` answers every actor from the row alone, with **no query against your tables**, even
+under `config.actor_label_strategy = :live`. `deleted?` is then `false`, because nothing looked. Use it
+for large index pages, and for requests whose actor class no longer exists.
+
+`routes:` is whatever object your `t.path` lambdas call url helpers on, usually the view. Without it,
+every `path` is `nil`.
+
+### Payload
+
+Fields are ordered **alphabetically by key**. `jsonb` does not keep insertion order, so no other ordering
+is deterministic. A field's `value` is the `op.payload_labels` entry for that key when the declaration
+produced one, and the raw value otherwise. Most fields having no label is normal.
+
+```ruby
+config.payload_preview_limit = 3                                          # default; 0 hides the preview
+config.payload_renderer      = ->(request, view) { view.render "admin/payload", request: }
+```
+
+`payload_renderer` replaces the built-in payload partial. It needs a view, so the views call it and the
+presenter does not.
+
+### Status
+
+| Status       | Tone       | Tooltip                                   |
+|--------------|------------|-------------------------------------------|
+| `pending`    | `neutral`  |                                           |
+| `approved`   | `primary`  |                                           |
+| `executing`  | `primary`  |                                           |
+| `successful` | `success`  |                                           |
+| `failed`     | `danger`   | the last failed attempt's error message   |
+| `rejected`   | `danger`   |                                           |
+| `canceled`   | `neutral`  | the cancellation reason                   |
+| `expired`    | `warning`  | `Expired at <expires_at, ISO8601 UTC>`    |
+
+A request **executed by override** has tone `warning` instead (a failed one stays `danger`), and a tooltip
+naming the approvals it had, the approvals it needed and the override reason.
+
+Tones are a closed set: `neutral`, `primary`, `success`, `warning`, `danger`.
+
+## Labels and translations
+
+Every label is looked up under `change_requests.*` and falls back to the humanized key, so nothing needs a
+locale file:
+
+```yaml
+en:
+  change_requests:
+    fields:
+      member_id: "Member"
+    statuses:
+      pending: "Awaiting approval"
+      expired_tooltip: "Ran out at %{expires_at}"
+      overridden_tooltip: "Forced through with %{present}/%{required} approvals: %{reason}"
+    stages:
+      sign_off: "Director sign-off"
+    quorums:
+      owners: "Owners"
+    actions:
+      execute_override: "Execute without approval"
+    timeline:
+      requested: "Raised"
+```
+
+Tooltip times are ISO8601 UTC. Format them for display in your view.
