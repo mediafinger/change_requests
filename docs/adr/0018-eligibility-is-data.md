@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
+- **Corrected:** 2026-09-16
 
 ## Context
 
@@ -41,6 +42,11 @@ one quorum definition.
 `Authorization::Callable` on assignment, so the host writes a lambda and the gem still has an object
 answering `allows?`.
 
+**The registry's class-level switches hold under any policy.** `t.may_approve = false` refuses in
+`Guards::Base#qualifying` before the policy is consulted, as `t.may_execute` does in
+`Guards::Execute`. A replaced policy decides *which* actors of a permitted class may approve; it cannot
+readmit a class the registration has shut out.
+
 ## Consequences
 
 ### Positive
@@ -60,5 +66,12 @@ answering `allows?`.
 - When the inbox query ships, its SQL and this Ruby predicate become two expressions of one rule. The
   mitigation is that there is exactly one Ruby implementation and one shared table of cases for the
   SQL to be held against, not that the risk is absent.
+- A replaced policy is **stage-granular**. `Authorization::Callable` receives `actor:, request:,
+  stage:, action:` and no quorum, and `action` is always `:approve` for eligibility, so a host policy
+  cannot express "this actor counts toward that quorum". Under `all_quorums` it admits the actor to
+  every quorum of the stage, and the linking rule of [ADR-0017](0017-approvals-count-through-links.md)
+  alone keeps that to one.
+- The inbox query reads the rows and cannot call a host lambda. With a replaced policy, the inbox and
+  the approve button answer from different sources, and keeping them consistent is the host's job.
 - An unregistered actor class raises rather than returning false. That is the allowlist working, but
   it means the predicate is not total over arbitrary objects.

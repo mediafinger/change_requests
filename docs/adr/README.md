@@ -40,3 +40,5 @@ than an edit.
 | [0026](0026-distinct-intent-distinct-command.md) | Give a distinct intent a distinct command class, not a flag | Accepted |
 | [0027](0027-activejob-is-optional.md) | Make background execution a setting and ActiveJob an optional dependency | Accepted |
 | [0028](0028-sweeps-are-rake-tasks.md) | Sweep with rake tasks, and keep the destructive one off the schedule | Accepted |
+| [0029](0029-actor-references-resolve-lazily-and-degrade.md) | Resolve actor references lazily, in batches, and degrade rather than raise | Accepted |
+| [0030](0030-visibility-is-a-scope.md) | Scope visibility with one relation, undeclared operations first | Accepted |

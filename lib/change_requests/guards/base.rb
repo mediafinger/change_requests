@@ -177,8 +177,15 @@ module ChangeRequests
         REASON_ERRORS.fetch(reason) { self.class.error_class }
       end
 
+      # `may_approve` is the registry's class-level prohibition, and it holds whichever policy
+      # decides eligibility - the way Guards::Execute enforces `may_execute` itself. Asked here,
+      # before any policy, because a host replacing `config.authorization` with a Pundit or
+      # ActionPolicy lambda would otherwise let a class the registry forbids from approving approve
+      # (§9.1, §9.2). Authorization::Permissions checks it too: that copy is the predicate's own
+      # contract, which M9c's inbox query has to agree with; this one is the guard's.
       def qualifying(quorums)
         return [] if quorums.nil?
+        return [] unless ChangeRequests.registered_type!(actor).may_approve
 
         quorums.select { |quorum| authorization.allows?(actor: actor, quorum: quorum) }
       end

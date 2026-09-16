@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
+- **Corrected:** 2026-09-16
 
 ## Context
 
@@ -21,6 +22,12 @@ command at decision time and **never re-derived**
 ([ADR-0007](0007-append-only-audit-trail.md) makes the rows immutable). A quorum is satisfied when
 its linked approvals reach its `threshold`, and that count is the only rule.
 
+**Which quorums an approval links to depends on `satisfied_by`.** Under `any_quorum` it links to every
+quorum the actor qualifies for: satisfying any one ends the stage. Under `all_quorums` it links to
+exactly one, the lowest-`position` pending quorum the actor qualifies for, so one person holding two
+roles cannot meet two quorums that must both be met. `Guards::Approve#countable_quorums` computes
+the set; `Commands::Approve` writes it ([ADR-0015](0015-one-guard-object-per-transition.md)).
+
 `ChangeRequests::Commands::EvaluateWorkflow` is the only code that changes stage or request status as
 a consequence of a decision. It is a command like any other
 ([ADR-0016](0016-commands-are-the-only-writers.md)) but internal: no actor, never called by a host,
@@ -29,12 +36,13 @@ order:
 
 0. A rejection standing on the current stage makes it `rejected`, whatever its approvals say; a stage
    that was rejected and holds none any more returns to `pending`, with its approvals still counting.
-1. Recount every quorum of the current stage from its links, setting or clearing `satisfied_at`.
+1. Recount every quorum of the current stage from its links, setting or clearing `satisfied_at`, and
+   emit `quorum_satisfied` for each quorum that became satisfied.
 2. The stage is satisfied when **any** of its quorums is, or **all**, per `satisfied_by`.
 3. A satisfied stage closes immediately, and the request advances to the next stage — or becomes
    `approved` when none remains.
 
-Closing emits one `quorum_satisfied` per satisfied quorum and then one `stage_satisfied`, both
+`quorum_satisfied` is emitted when the quorum is met, and closing emits one `stage_satisfied`, both
 attributed to the System sentinel ([ADR-0011](0011-system-sentinel-actor.md)). Closing a stage is the
 gem's own act, not the approver's: the approvals that caused it are already in the trail one row
 earlier, each naming the person who gave it, and attributing the close to whoever approved last would
@@ -57,20 +65,12 @@ approver or from the requester stops the stage, and no rejection threshold is mo
 
 ### Negative
 
-- **The `all_quorums` linking rule is not implemented yet.** Under `any_quorum` an approval links to
-  every quorum the actor qualifies for, which is right, because satisfying any one of them ends the
-  stage. Under `all_quorums` it should link to exactly one — the lowest-`position` quorum the actor
-  qualifies for — so that one person holding two roles cannot close two quorums that must both be
-  met. It currently links to all of them, so an actor holding both `admin` and `owner` satisfies
-  "one Admin **and** one Owner" alone. The stage-satisfaction half of `all_quorums` ships and is
-  correct; only the linking half is outstanding. No shipped declaration syntax can build such a
-  stage — `op.approvals` describes one stage holding one quorum — so nothing reaches it today, and
-  it must be closed before the workflow DSL makes multi-quorum stages declarable.
-- **`quorum_satisfied` is emitted when the stage closes, not when the quorum was met.** For a
-  single-quorum stage the two moments are the same. Under `all_quorums` they are not: a quorum met by
-  an earlier approval gets its event later, timestamped at the close, and a quorum on a stage that
-  never closes gets none at all. The trail never claims a satisfaction that was later withdrawn,
-  which is the compensation, but it does not yet answer "when was this counting rule met".
+- Under `all_quorums` the order of quorums is load-bearing: an actor qualifying for two lands on the
+  lower `position`, and a host that wanted them counted toward the other has to reorder the
+  declaration.
+- A quorum can be demoted by `Commands::Unapprove`, and that emits no event of its own. The
+  withdrawn decision's `unapproved` event already names the quorums it counted toward, so a trail
+  reader reconstructs the demotion from that row rather than from a dedicated kind.
 - Reopening a rejected stage does not clear `rejected_at`. Nothing writes that column yet, so there
   is nothing stale to clear; the milestone that starts writing it has to clear it here.
 - `Stage`'s `satisfied` status and `satisfied_at` are unreachable while every cooldown is zero: a
