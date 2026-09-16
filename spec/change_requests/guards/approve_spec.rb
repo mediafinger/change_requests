@@ -249,6 +249,39 @@ RSpec.describe ChangeRequests::Guards::Approve do
     end
   end
 
+  # Regression. `t.may_approve = false` was enforced only inside Authorization::Permissions, so a
+  # host that replaced `config.authorization` with a lambda - which is exactly what docs/04's Pundit
+  # and ActionPolicy recipes do - silently let a class the registry forbids from approving approve.
+  # The registry's class-level prohibition holds whichever policy decides eligibility, the way
+  # Guards::Execute has always enforced may_execute itself.
+  describe "an actor class that may not approve, under a host's own policy (§9.1, §9.2)" do
+    before do
+      ChangeRequests.config.actor_types.fetch("Admin").may_approve = false
+      ChangeRequests.config.authorization = ->(**) { true }
+    end
+
+    it "is refused, however permissive the policy" do
+      expect(guard.reason).to eq(:not_permitted)
+    end
+
+    it "never reaches the policy, since the registry has already answered" do
+      called = false
+      ChangeRequests.config.authorization = lambda { |**|
+        called = true
+      }
+
+      guard.reason
+
+      expect(called).to be(false)
+    end
+
+    it "is still permitted once the registry allows it" do
+      ChangeRequests.config.actor_types.fetch("Admin").may_approve = true
+
+      expect(guard.reason).to be_nil
+    end
+  end
+
   # §5.3, §7.1: the subset an approval actually links to. Under all_quorums it is a *strict* subset -
   # exactly one quorum - which is what stops one person closing two quorums that must both be met.
   describe "#countable_quorums" do
