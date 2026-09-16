@@ -143,7 +143,7 @@ RSpec.describe ChangeRequests::Commands::Base do
 
     describe "the actor triple" do
       it "snapshots the acting actor, label included (§5.5)" do
-        expect(event.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+        expect(event.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
       end
 
       # Expiry, the reaper and undeclared-operation cancellation have no actor. The sentinel keeps
@@ -151,7 +151,7 @@ RSpec.describe ChangeRequests::Commands::Base do
       it "falls back to the System sentinel when the command has no actor" do
         event = CommandProbes::Emitting.call(request: change_request, actor: nil)
 
-        expect(event.actor).to eq(ChangeRequests::SYSTEM_ACTOR)
+        expect(event.actor.to_h).to eq(ChangeRequests::SYSTEM_ACTOR)
         expect(event).to be_system_actor
       end
 

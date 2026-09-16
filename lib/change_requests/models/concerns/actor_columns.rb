@@ -13,10 +13,10 @@ module ChangeRequests
     # over the whole triple, so a command assigns an actor object and the label is snapshotted:
     #
     #   request.requester = current_admin   # writes type, id and the label as it is now
-    #   request.requester                   # => { type: "Admin", id: "42", label: "Grace (admin)" }
+    #   request.requester                   # => ActorRef
     #
-    # M4 replaces that Hash with ActorRef, which resolves the live record and falls back to the
-    # snapshot.
+    # The reader returns an `ActorRef` (§9.1), which answers the stored triple with no query and
+    # resolves the live record only when asked for a fresh label, the record itself or a path.
     module ActorColumns
       extend ActiveSupport::Concern
 
@@ -69,11 +69,11 @@ module ChangeRequests
 
               return nil if type.blank?
 
-              reference = { type: type, id: public_send(:"#{prefix}_id") }
-              reference[:label] = public_send(:"#{prefix}_label") if label
-              reference[:identity] = public_send(:"#{prefix}_identity") if identity
+              columns = {}
+              columns[:label] = public_send(:"#{prefix}_label") if label
+              columns[:identity] = public_send(:"#{prefix}_identity") if identity
 
-              reference
+              ActorRef.new(type: type, id: public_send(:"#{prefix}_id"), **columns)
             end
 
             define_method(:"#{prefix}=") do |actor|

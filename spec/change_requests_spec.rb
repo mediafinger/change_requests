@@ -48,7 +48,7 @@ RSpec.describe ChangeRequests do
 
       request = described_class.request!("members.update_roles", **arguments, tenant: organization)
 
-      expect(request.tenant).to eq(type: "Organization", id: organization.id.to_s, label: "Acme")
+      expect(request.tenant.to_h).to eq(type: "Organization", id: organization.id.to_s, label: "Acme")
     end
 
     # §6.5's example verbatim: the call is identical however elaborate the workflow is, because

@@ -193,13 +193,18 @@ module ChangeRequests
         identity.present? && stage.approvals.exists?(approver_identity: identity)
       end
 
+      # Either side may be a live actor object, an ActorRef read off a row, or the plain triple.
+      # A ref carries the identity that was snapshotted when the decision was made, which is what
+      # lets the rule still recognise a person whose record has since been deleted (§9.4).
       def identity_of(subject)
+        return subject.identity if subject.is_a?(ActorRef)
         return subject[:identity] if subject.is_a?(Hash)
 
         config.actor_identity&.call(subject)
       end
 
       def reference_of(subject)
+        return { type: subject.type, id: subject.id } if subject.is_a?(ActorRef)
         return subject.slice(:type, :id) if subject.is_a?(Hash)
 
         ChangeRequests.actor_attributes(subject).slice(:type, :id)

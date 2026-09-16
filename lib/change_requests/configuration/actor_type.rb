@@ -11,14 +11,21 @@ module ChangeRequests
     # `name` is the full constant name, verbatim - "Accounts::Admin", and the subclass's own name
     # under STI, since two STI subclasses may need different labels, permissions and key casts.
     #
-    # `finder` and `path` arrive with M4.
+    # `finder` arrives with M4-2.
     class ActorType < RegisteredType
-      attr_accessor :permissions, :may_request, :may_approve, :may_execute
+      # `path` is the optional deep link a view renders an actor as (§9.1, §12):
+      #
+      #   t.path = ->(user, routes) { routes.admin_user_path(user) }
+      #
+      # Nil by default, and never required: a headless caller has no url helpers to pass, and
+      # `ActorRef#path` answers nil rather than guessing.
+      attr_accessor :permissions, :path, :may_request, :may_approve, :may_execute
 
       def initialize(name)
         super
 
         @permissions = nil
+        @path        = nil
         @may_request = true
         @may_approve = true
         @may_execute = true

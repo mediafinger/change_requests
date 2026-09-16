@@ -106,7 +106,7 @@ RSpec.describe ChangeRequests::Commands::Reject do
     end
 
     it "snapshots the rejector, label included" do
-      expect(decision.approver).to include(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(decision.approver.to_h).to include(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     it "keeps the reason beside the decision as well as in the trail" do
@@ -142,7 +142,7 @@ RSpec.describe ChangeRequests::Commands::Reject do
     end
 
     it "attributes it to the rejector" do
-      expect(event.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(event.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     # Whether the workflow continued is the first thing an audit asks, and it turns on a config

@@ -37,7 +37,7 @@ RSpec.describe ChangeRequests::Commands::Create do
     end
 
     it "snapshots the requester triple, label included (§5.7)" do
-      expect(change_request.requester)
+      expect(change_request.requester.to_h)
         .to include(type: "Admin", id: requester.id.to_s, label: "Ada (admin)")
     end
 
@@ -50,7 +50,7 @@ RSpec.describe ChangeRequests::Commands::Create do
 
       change_request = described_class.call(**arguments, tenant: organization)
 
-      expect(change_request.tenant).to eq(type: "Organization", id: organization.id.to_s, label: "Acme")
+      expect(change_request.tenant.to_h).to eq(type: "Organization", id: organization.id.to_s, label: "Acme")
     end
 
     it "takes max_attempts from the declaration (§5.6)" do
@@ -358,7 +358,7 @@ RSpec.describe ChangeRequests::Commands::Create do
     end
 
     it "attributes it to the requester" do
-      expect(event.actor).to eq(type: "Admin", id: requester.id.to_s, label: "Ada (admin)")
+      expect(event.actor.to_h).to eq(type: "Admin", id: requester.id.to_s, label: "Ada (admin)")
     end
 
     it "stamps the version in force, which at creation is the request's own" do
@@ -382,7 +382,7 @@ RSpec.describe ChangeRequests::Commands::Create do
     it "reaches the guards through the requester reference, so same_person? can use it" do
       ChangeRequests.config.actor_identity = ->(person) { person.name }
 
-      expect(change_request.requester[:identity]).to eq("Ada")
+      expect(change_request.requester.identity).to eq("Ada")
     end
 
     it "is a creation-time fact and cannot be rewritten (§5.1)" do

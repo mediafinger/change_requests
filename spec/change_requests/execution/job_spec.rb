@@ -135,7 +135,7 @@ RSpec.describe "§8's background execution mode" do
       execute
       perform_enqueued!
 
-      expect(change_request.reload.executer).to eq(type: "Manager", id: "mgr-1", label: "Olive")
+      expect(change_request.reload.executer.to_h).to eq(type: "Manager", id: "mgr-1", label: "Olive")
       expect(change_request.events.find_by!(kind: "executed").actor_label).to eq("Olive")
     end
 

@@ -91,7 +91,7 @@ RSpec.describe ChangeRequests::Execution::Runner do
       run
 
       expect(change_request.reload.executed_at).to be_within(5.seconds).of(Time.current)
-      expect(change_request.executer)
+      expect(change_request.executer.to_h)
         .to eq(type: "Manager", id: "mgr-1", label: "Olive")
     end
 
@@ -108,7 +108,7 @@ RSpec.describe ChangeRequests::Execution::Runner do
     it "records who claimed it on the attempt too (§5.6)" do
       run
 
-      expect(change_request.attempts.sole.executer)
+      expect(change_request.attempts.sole.executer.to_h)
         .to eq(type: "Manager", id: "mgr-1", label: "Olive")
     end
 

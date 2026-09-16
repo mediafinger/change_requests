@@ -76,7 +76,7 @@ RSpec.describe ChangeRequests::Commands::Cancel do
     end
 
     it "attributes it to whoever cancelled" do
-      expect(event.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(event.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     # Recorded before the status changes, so the trail says what was called off rather than what it
