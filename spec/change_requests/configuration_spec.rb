@@ -46,6 +46,11 @@ RSpec.describe ChangeRequests::Configuration do
       expect(config.default_max_attempts).to eq(1)
       expect(config.default_expires_in).to be_nil
     end
+
+    it "previews three payload fields and renders the payload itself (§5.12, §10)" do
+      expect(config.payload_preview_limit).to eq(3)
+      expect(config.payload_renderer).to be_nil
+    end
   end
 
   describe "#actor_type" do
@@ -195,6 +200,46 @@ RSpec.describe ChangeRequests::Configuration do
       config.default_max_attempts = 0
 
       expect { config.validate! }.to raise_error(/default_max_attempts is 0/)
+    end
+
+    describe "payload presentation (§5.12, §10)" do
+      before { register_valid_actor_type(config) }
+
+      it "accepts a preview limit of zero, which hides the preview" do
+        config.payload_preview_limit = 0
+
+        expect(config.validate!).to be(true)
+      end
+
+      it "rejects a negative preview limit" do
+        config.payload_preview_limit = -1
+
+        expect { config.validate! }.to raise_error(/payload_preview_limit is -1/)
+      end
+
+      it "rejects a preview limit that is not an integer" do
+        config.payload_preview_limit = "3"
+
+        expect { config.validate! }.to raise_error(/payload_preview_limit is "3"/)
+      end
+
+      it "accepts a renderer taking the request and the view" do
+        config.payload_renderer = ->(_request, _view) { "" }
+
+        expect(config.validate!).to be(true)
+      end
+
+      it "rejects a renderer taking only the request" do
+        config.payload_renderer = ->(_request) { "" }
+
+        expect { config.validate! }.to raise_error(/payload_renderer is .+request and the view/m)
+      end
+
+      it "rejects a renderer that cannot be called" do
+        config.payload_renderer = "admin/payload"
+
+        expect { config.validate! }.to raise_error(%r{payload_renderer is "admin/payload"})
+      end
     end
 
     # One boot should fix one round of mistakes, not one mistake per boot.
