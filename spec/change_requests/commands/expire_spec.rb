@@ -75,7 +75,7 @@ RSpec.describe ChangeRequests::Commands::Expire do
     end
 
     it "carries the System sentinel actor" do
-      expect(event.actor).to eq(ChangeRequests::SYSTEM_ACTOR)
+      expect(event.actor.to_h).to eq(ChangeRequests::SYSTEM_ACTOR)
     end
 
     it "says so through the model's own predicate" do

@@ -85,7 +85,7 @@ RSpec.describe ChangeRequests::Commands::Unapprove do
     end
 
     it "attributes it to the actor who retracted" do
-      expect(event.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(event.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     # Without this, a request that gained and lost the same approval twice would leave two

@@ -20,14 +20,14 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
       admin = Admin.create!(name: "Grace")
       change_request.requester = admin
 
-      expect(change_request.requester)
+      expect(change_request.requester.to_h)
         .to eq(type: "Admin", id: admin.id.to_s, label: "Grace (admin)", identity: nil)
     end
 
     it "reads back only the columns the reference declares" do
       change_request.executer = Admin.create!(name: "Grace")
 
-      expect(change_request.executer.keys).to contain_exactly(:type, :id, :label)
+      expect(change_request.executer.to_h.keys).to contain_exactly(:type, :id, :label)
     end
 
     it "is nil when nothing is set" do
@@ -57,7 +57,7 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
         change_request.requester = Admin.create!(name: "Grace")
 
         expect(change_request.requester_identity).to eq("person-7")
-        expect(change_request.requester[:identity]).to eq("person-7")
+        expect(change_request.requester.identity).to eq("person-7")
       end
 
       it "is snapshotted, so a later change to the lambda does not move it" do
@@ -135,7 +135,7 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
 
       admin.destroy
 
-      expect(request.reload.requester)
+      expect(request.reload.requester.to_h)
         .to eq(type: "Admin", id: admin_id, label: "Grace (admin)", identity: nil)
     end
 
@@ -209,7 +209,7 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
     it "reads a triple without one" do
       row = quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42")
 
-      expect(row.actor).to eq(type: "Admin", id: "42")
+      expect(row.actor.to_h).to eq(type: "Admin", id: "42")
     end
 
     it "assigns from an actor object without trying to write one" do

@@ -80,7 +80,7 @@ RSpec.describe ChangeRequests::Maintenance do
 
       described_class.expire_stale!
 
-      expect(system_event(request, "expired").actor)
+      expect(system_event(request, "expired").actor.to_h)
         .to eq(ChangeRequests::SYSTEM_ACTOR)
     end
   end
@@ -132,7 +132,7 @@ RSpec.describe ChangeRequests::Maintenance do
 
       expect(event.metadata["attempt"]).to eq(1)
       expect(event.metadata["stuck_for"]).to be_within(60).of(2.hours.to_i)
-      expect(event.actor).to eq(ChangeRequests::SYSTEM_ACTOR)
+      expect(event.actor.to_h).to eq(ChangeRequests::SYSTEM_ACTOR)
     end
 
     it "leaves an execution that started recently" do
@@ -267,7 +267,7 @@ RSpec.describe ChangeRequests::Maintenance do
       end
 
       it "carries the System sentinel" do
-        expect(event.actor).to eq(ChangeRequests::SYSTEM_ACTOR)
+        expect(event.actor.to_h).to eq(ChangeRequests::SYSTEM_ACTOR)
       end
 
       it "records the key and the creation-time version whose disappearance it reports (§5.5)" do

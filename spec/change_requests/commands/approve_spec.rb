@@ -32,7 +32,7 @@ RSpec.describe ChangeRequests::Commands::Approve do
     end
 
     it "snapshots the approver, label included (§5.7)" do
-      expect(approval.approver)
+      expect(approval.approver.to_h)
         .to include(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
@@ -92,7 +92,7 @@ RSpec.describe ChangeRequests::Commands::Approve do
     end
 
     it "attributes it to the approver" do
-      expect(event.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(event.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     it "names the stage the decision landed on (§5.9)" do

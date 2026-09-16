@@ -32,7 +32,7 @@ RSpec.describe ChangeRequests::Commands::Comment do
     end
 
     it "attributes it to whoever commented" do
-      expect(comment.actor).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
+      expect(comment.actor.to_h).to eq(type: "Admin", id: actor.id.to_s, label: "Ada (admin)")
     end
 
     it "carries no metadata - a comment is about the request, not a stage" do

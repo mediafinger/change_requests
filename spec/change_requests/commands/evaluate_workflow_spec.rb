@@ -228,7 +228,7 @@ RSpec.describe ChangeRequests::Commands::EvaluateWorkflow do
     it "attributes both to the System sentinel" do
       closing = events.where(kind: %w(quorum_satisfied stage_satisfied))
 
-      expect(closing.map(&:actor).uniq).to eq([ChangeRequests::SYSTEM_ACTOR])
+      expect(closing.map { |event| event.actor.to_h }.uniq).to eq([ChangeRequests::SYSTEM_ACTOR])
     end
 
     it "names the stage" do
