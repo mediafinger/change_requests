@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
+- **Corrected:** 2026-09-16
 
 ## Context
 
@@ -53,9 +54,11 @@ One set of checks, split by what they need in order to run:
 - `validate!` growing to the full `#problems` set made declaration stricter than it was. Every
   incomplete fixture in the suite had to gain a service and a workflow, and a host that liked
   declaring an operation in pieces across two initializers no longer can.
-- **`verify!` does not check everything §6.12 claims.** An unsatisfiable `all_quorums` stage is still
-  unchecked, because "unsatisfiable" is undecidable once permission rows are involved — eligibility is
-  a host runtime question. The gap is recorded in §17.1 rather than papered over.
+- **The unsatisfiable-`all_quorums` check covers one shape only.** `#problems` refuses an
+  `all_quorums` stage holding an eligibility-closed quorum — named approvers, no permission rows —
+  that names fewer actors than its threshold. Once a permission row is involved, "unsatisfiable" is
+  undecidable from a declaration, because who holds a permission is a host runtime question, so a
+  stage no living actor can satisfy still passes `verify!`.
 - The `to_prepare` hook runs on every reload in development, so a large registry pays a constantize
   per cycle. Cheap today; a host with hundreds of operations may disagree.
 - Three readers of `#problems` means changing it changes three behaviours at once. That is the point,

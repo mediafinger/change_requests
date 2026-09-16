@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-11
+- **Corrected:** 2026-09-16
 
 ## Context
 
@@ -22,7 +23,9 @@ Every actor reference is three columns: `*_type`, `*_id` and, where a decision w
 - `*_label` is **snapshotted at write time** through the lambda the registration supplies, and is
   never recomputed.
 
-No foreign key in the gem points at a host table, and none ever will.
+No foreign key in the gem points at a host table, and none ever will. Every reader returns the
+triple as a `ChangeRequests::ActorRef`, which resolves the record lazily through the registration
+([ADR-0029](0029-actor-references-resolve-lazily-and-degrade.md)).
 
 ## Consequences
 
@@ -35,8 +38,9 @@ No foreign key in the gem points at a host table, and none ever will.
 
 ### Negative
 
-- The stored label is a snapshot and drifts from the record. `config.actor_label_strategy` exists so
-  that readers can prefer the live record and fall back to the snapshot.
+- The stored label is a snapshot and drifts from the record. `config.actor_label_strategy` decides
+  what `ActorRef#label` shows: `:live` prefers the resolved record and falls back to the snapshot,
+  `:snapshot` never queries.
 - Nothing at the database level guarantees an actor still exists; referential integrity here is a
   deliberate non-goal.
 - Every actor class must be registered before it can request or approve, which is one more thing a
