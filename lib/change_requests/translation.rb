@@ -9,10 +9,12 @@ module ChangeRequests
   module Translation
     module_function
 
-    def translate(key, default:)
-      return default unless available?
+    # `values` interpolate `%{name}` references, into the default too when there is no I18n.
+    def translate(key, default:, **values)
+      return I18n.translate(key, default: default, **values) if available?
 
-      I18n.translate(key, default: default)
+      # `format` would read a bare "%" in an untranslated message as a broken directive.
+      values.empty? ? default : format(default, **values)
     end
 
     def available?

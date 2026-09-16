@@ -136,3 +136,7 @@ Style/WordArray:
 
 Style/SignalException:
   EnforcedStyle: semantic
+
+# I18n interpolates `%{name}`, and Translation.translate formats untranslated defaults the same way.
+Style/FormatStringToken:
+  EnforcedStyle: template
