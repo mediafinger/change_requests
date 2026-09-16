@@ -58,3 +58,7 @@ en:
     #     sign_off: "Director sign-off"
     #   quorums:
     #     owners: "Owners"
+    #
+    # Presenter values label the same way (§11), each under its own key: `fields.<payload key>`,
+    # `statuses.<status>`, `actions.<action>` and `timeline.<event kind>`. `timeline` rather than
+    # `events`, which holds the bodies above.
