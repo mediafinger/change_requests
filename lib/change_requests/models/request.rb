@@ -76,6 +76,15 @@ module ChangeRequests
       where(status: OPEN_STATUSES - %w(executing)).with_undeclared_operation
     }
 
+    # The requests this actor raised. By `(type, id)` rather than by `requester_identity`: two
+    # actor classes that are one human still raised their requests separately, and §9.4's identity
+    # answers "may they approve this", which is a different question.
+    scope :requested_by, lambda { |actor|
+      reference = ChangeRequests.actor_attributes(actor)
+
+      where(requester_type: reference[:type], requester_id: reference[:id])
+    }
+
     # What an actor may see (§9.3). Two rules, in this order: a request whose operation is no
     # longer declared is **invisible to everyone** - it leaves inboxes and badges the moment the
     # declaration goes, before any cleanup runs (§5.11) - and then the host's own visibility rule

@@ -37,16 +37,24 @@ module ChangeRequests
     # registered lambda. Raises before anything is constantized: the registry is the allowlist, and
     # `actor.class.name` is only ever compared against it (§5.7).
     def actor_attributes(actor, registry: :actor_types)
+      registered = registered_type!(actor, registry: registry)
+
+      { type: actor.class.name, id: actor.id.to_s, label: registered.label.call(actor).to_s }
+    end
+
+    # The allowlist, as a raise. `actor.class.name` is only ever compared against the registry and
+    # nothing is constantized (§5.7), so an unregistered class cannot enter the system through any
+    # path - including `ChangeRequests::Actor`, which a host may include before its initializer has
+    # run and which therefore refuses on use rather than on load.
+    def registered_type!(actor, registry: :actor_types)
       type = actor.class.name
       registered = config.public_send(registry)[type]
 
-      if registered.nil?
-        fail UnknownActorType,
-             "#{type} is not a registered #{registry.to_s.singularize.humanize.downcase}. " \
-             "Register it with `config.#{registry.to_s.singularize} \"#{type}\"`."
-      end
+      return registered if registered
 
-      { type: type, id: actor.id.to_s, label: registered.label.call(actor).to_s }
+      fail UnknownActorType,
+           "#{type} is not a registered #{registry.to_s.singularize.humanize.downcase}. " \
+           "Register it with `config.#{registry.to_s.singularize} \"#{type}\"`."
     end
 
     # The host-facing entry point (§6.5), wrapping Commands::Create. The key is positional and the
