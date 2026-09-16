@@ -43,6 +43,13 @@ RSpec.describe ChangeRequests::ActorResolver do
       expect { expect(refs.first.record).to eq(admin) }.to issue_no_queries
     end
 
+    it "skips a ref built not to resolve" do
+      unresolving = ref("Admin", admin.id).without_resolution
+
+      expect { described_class.call([unresolving]) }.to issue_no_queries
+      expect(unresolving).not_to be_deleted
+    end
+
     it "skips refs a caller already resolved rather than querying again" do
       resolved = ref("Admin", admin.id)
       resolved.record

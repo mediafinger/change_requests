@@ -181,6 +181,53 @@ RSpec.describe ChangeRequests::ActorRef do
   end
 
   # §19.15: the sentinel is an ActorRef like any other, so a timeline never branches on it.
+  # §11's fast path: `RequestPresenter.new(resolve_actors: false)` renders from the row alone.
+  describe "#without_resolution" do
+    subject(:unresolving) { ref.without_resolution }
+
+    before { ref }
+
+    it "answers from the row with no query, even under :live labels" do
+      ChangeRequests.config.actor_label_strategy = :live
+      admin.update!(name: "Renamed")
+
+      expect { expect(unresolving.label).to eq("Ada (admin)") }.to issue_no_queries
+    end
+
+    it "has no record and no path" do
+      expect { expect([unresolving.record, unresolving.path(Object.new)]).to eq([nil, nil]) }.to issue_no_queries
+    end
+
+    # Nobody looked, so nobody knows. "(deleted)" would be a false claim about the host's data.
+    it "is neither resolved nor deleted" do
+      expect([unresolving.resolved?, unresolving.deleted?]).to eq([false, false])
+    end
+
+    it "is not deleted even when the record is gone" do
+      expect(gone.without_resolution).not_to be_deleted
+    end
+
+    it "is not resolving, where the original is" do
+      expect([ref.resolving?, unresolving.resolving?]).to eq([true, false])
+    end
+
+    it "equals the ref it was copied from, since equality is the stored triple" do
+      expect(unresolving).to eq(ref)
+    end
+
+    it "keeps identity" do
+      original = described_class.new(type: "Admin", id: "1", label: "Ada", identity: "p7")
+
+      expect(original.without_resolution.to_h).to eq(original.to_h)
+    end
+
+    it "leaves the original free to resolve" do
+      unresolving
+
+      expect(ref.record).to eq(admin)
+    end
+  end
+
   describe "the System sentinel" do
     subject(:system) { described_class.new(**ChangeRequests::SYSTEM_ACTOR) }
 
