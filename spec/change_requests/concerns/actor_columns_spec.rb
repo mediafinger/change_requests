@@ -202,22 +202,23 @@ RSpec.describe ChangeRequests::Concerns::ActorColumns do
     end
   end
 
-  describe "references with no label column" do
+  # Every reference is labelled, eligibility rows included (M5-3).
+  describe "an eligibility row" do
     let(:stage) { build_stage(change_request) }
     let(:quorum) { build_quorum(stage) }
 
-    it "reads a triple without one" do
-      row = quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42")
+    it "reads the full triple" do
+      row = quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42", actor_label: "Grace (admin)")
 
-      expect(row.actor.to_h).to eq(type: "Admin", id: "42")
+      expect(row.actor.to_h).to eq(type: "Admin", id: "42", label: "Grace (admin)")
     end
 
-    it "assigns from an actor object without trying to write one" do
+    it "snapshots the label when assigned an actor object" do
       admin = Admin.create!(name: "Grace")
       row = quorum.eligible_actors.build(actor: admin)
 
       expect(row).to be_valid
-      expect(row.actor_id).to eq(admin.id.to_s)
+      expect(row.actor_label).to eq("Grace (admin)")
     end
   end
 end
