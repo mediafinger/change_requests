@@ -205,5 +205,6 @@ tenant per actor stops passing it at every call site. An explicit `tenant:` alwa
 
 ### Index and show
 
-The engine applies `visible_to` to **show as well as index**. A request outside it is a **404, not a
-403**: a 403 confirms the row exists, which is precisely what tenant scoping is hiding.
+Apply `visible_to` to **show as well as index**, and answer a request outside it with a **404, not a
+403**: a 403 confirms the row exists, which is precisely what tenant scoping is hiding. The engine's
+own controllers, when they ship, do exactly that; until then it is your controller's job.
