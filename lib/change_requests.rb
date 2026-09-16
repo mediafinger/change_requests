@@ -90,6 +90,14 @@ module ChangeRequests
            "defined only where ActiveJob is loaded, which this process has not done (§8)."
     end
 
+    # Which registration a stored `*_type` belongs to, actor or tenant. Nil for a type nobody
+    # registered, which is a ref that resolves to nothing rather than an error (§5.11, §11).
+    def registered_type(name)
+      return nil if name.blank?
+
+      config.actor_types[name.to_s] || config.tenant_types[name.to_s]
+    end
+
     def configure
       yield(config)
 

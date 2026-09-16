@@ -41,9 +41,23 @@ module ChangeRequests
     end
 
     def record
-      return @record unless UNRESOLVED.equal?(@record)
+      return @record if resolution_known?
 
       @record = resolve
+    end
+
+    # True once the record has an answer, hit or miss, **without asking for one**. `ActorResolver`
+    # reads it to skip refs a caller has already resolved.
+    def resolution_known?
+      !UNRESOLVED.equal?(@record)
+    end
+
+    # `ActorResolver`'s seam: a page resolves every ref in one query per actor type and hands each
+    # one its answer, so nothing resolves itself (§11).
+    def resolve_with(record)
+      @record = record
+
+      self
     end
 
     def resolved?
@@ -85,23 +99,23 @@ module ChangeRequests
     end
 
     def registered
-      ChangeRequests.config.actor_types[type] || ChangeRequests.config.tenant_types[type]
+      ChangeRequests.registered_type(type)
     end
 
     # Degrades, never raises (§11). An unregistered type, a class the application no longer defines,
     # and an id that will not cast to the column's type all resolve to nothing - a page rendering a
-    # five-year-old request must not blow up because someone deleted a model. M4-2 removes the last
-    # of those by casting per `key_type` before the finder ever sees the id.
+    # five-year-old request must not blow up because someone deleted a model.
+    #
+    # It goes through the same `cast_id` and `finder` the batch resolver uses, so resolving one ref
+    # and resolving a page of them cannot disagree about what a type's records are.
     def resolve
-      return nil if registered.nil? || id.blank?
+      return nil if registered.nil?
 
-      model = type.safe_constantize
+      cast = registered.cast_id(id)
 
-      return nil unless model.respond_to?(:find_by)
+      return nil if cast.nil?
 
-      model.find_by(id: id)
-    rescue ActiveRecord::StatementInvalid, RangeError
-      nil
+      Array(registered.finder.call([cast])).first
     end
   end
 end
