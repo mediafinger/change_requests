@@ -95,6 +95,32 @@ RSpec.describe ChangeRequests::ActorRef do
       expect(described_class.new(type: "Vanished", id: "1", label: "Old").record).to be_nil
     end
 
+    # Regression: the default finder called `.where` on whatever the name resolved to, so a plain
+    # Ruby actor class - the headless case - raised NoMethodError instead of degrading (§11).
+    it "resolves nothing for a registered class that is not ActiveRecord and declares no finder" do
+      stub_const("PlainActor", Struct.new(:id, :name))
+      ChangeRequests.config.actor_type("PlainActor") do |t|
+        t.key_type = :string
+        t.label = ->(actor) { actor.name }
+        t.may_approve = false
+      end
+
+      expect(described_class.new(type: "PlainActor", id: "p-1", label: "Plain"))
+        .to have_attributes(record: nil, deleted?: true, label: "Plain")
+    end
+
+    it "resolves a page of them to nothing too, rather than raising" do
+      stub_const("PlainActor", Struct.new(:id, :name))
+      ChangeRequests.config.actor_type("PlainActor") do |t|
+        t.key_type = :string
+        t.label = ->(actor) { actor.name }
+        t.may_approve = false
+      end
+      refs = [described_class.new(type: "PlainActor", id: "p-1", label: "Plain")]
+
+      expect(ChangeRequests::ActorResolver.call(refs)).to all(be_deleted)
+    end
+
     # M4-2 removes the need for this by casting per key_type before the finder sees the id.
     it "resolves nothing for an id that cannot be cast to the column's type" do
       expect(described_class.new(type: "Admin", id: "not-a-number", label: "Ada").record).to be_nil
