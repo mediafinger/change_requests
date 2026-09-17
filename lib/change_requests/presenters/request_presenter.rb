@@ -233,12 +233,15 @@ module ChangeRequests
       routes.public_send(helper, request) if routes.respond_to?(helper)
     end
 
-    # §8.1: an override is always confirmed, naming what it bypasses.
+    # §8.1: an override is always confirmed, naming what it bypasses - and nil once nothing is left to bypass.
     def confirmation(name)
       return unless name == :execute_override
 
       shortfall = request.approval_shortfall
       missing = shortfall[:approvals_required] - shortfall[:approvals_present]
+
+      return unless missing.positive?
+
       plural = missing == 1 ? "one" : "other"
       default = "This bypasses %{count} required approval#{"s" unless missing == 1}. Continue?"
 

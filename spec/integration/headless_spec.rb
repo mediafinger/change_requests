@@ -42,11 +42,11 @@ RSpec.describe "the domain core, headless" do
                                'presenter_preview=Member=7,Roles=["editor"]')
     end
 
-    # Grace approved an approved request: she may execute it. Cancel and Comment ask for a pending quorum
-    # she qualifies for, and the only one is satisfied.
+    # Grace approved an approved request: she may execute it and comment on it. Its last stage has
+    # closed, so nobody may cancel it any more (M5-8).
     it "presents actions from the guards, with no routes and no locale file" do
       expect(probe).to include("presenter_actions=approve=false,unapprove=false,reject=false,execute=true," \
-                               "cancel=false,comment=false",
+                               "cancel=false,comment=true",
                                "presenter_refusal=not_pending")
     end
 

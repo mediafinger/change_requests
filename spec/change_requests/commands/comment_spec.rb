@@ -118,24 +118,18 @@ RSpec.describe ChangeRequests::Commands::Comment do
       expect(change_request.events.where(kind: "commented")).to be_empty
     end
 
-    it "reports the authorization failure first" do
-      expect do
-        described_class.call(request: change_request, actor: Admin.create!(name: "Sam"), body: nil)
-      end.to raise_error(ChangeRequests::NotAuthorized) { |error|
-        expect(error.reason).to eq(:not_permitted)
-      }
+    it "reports an unregistered actor class before the missing body" do
+      expect { described_class.call(request: change_request, actor: Object.new, body: nil) }
+        .to raise_error(ChangeRequests::UnknownActorType)
     end
   end
 
+  # M5-8: anyone registered may comment.
   describe "the guard" do
-    it "raises NotAuthorized for an actor who is neither requester nor approver" do
-      expect do
-        described_class.call(request: change_request, actor: Admin.create!(name: "Sam"), body: "Hi")
-      end.to raise_error(ChangeRequests::NotAuthorized) { |error|
-        expect(error.reason).to eq(:not_permitted)
-      }
+    it "records a comment from an actor who is neither requester nor approver" do
+      described_class.call(request: change_request, actor: Admin.create!(name: "Sam"), body: "Hi")
 
-      expect(change_request.events.where(kind: "commented")).to be_empty
+      expect(change_request.events.where(kind: "commented").sole).to have_attributes(body: "Hi", actor_label: "Sam (admin)")
     end
   end
 

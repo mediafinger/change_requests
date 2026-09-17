@@ -167,6 +167,15 @@ RSpec.describe ChangeRequests::RequestPresenter, "#actions" do
           .to eq("This bypasses 1 required approval. Continue?")
       end
 
+      # "This bypasses 0 required approvals" is untrue of a request with nothing left to bypass.
+      it "asks for no confirmation when nothing would be bypassed" do
+        request = build("pending")
+        2.times { |i| ChangeRequests::Commands::Approve.call(request:, actor: Admin.create!(name: "A#{i}", roles: %w(member_admin))) }
+
+        expect(actions_for(request.reload, officer).find { |action| action.name == :execute_override })
+          .to have_attributes(enabled: false, confirm: nil)
+      end
+
       it "is labelled as what it is, never as Execute" do
         expect(override.label).to eq("Execute without approval")
       end

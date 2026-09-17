@@ -174,7 +174,7 @@
       "reason": "This request is already finished.",
       "method": "post",
       "path": "/change_requests/requests/<uuid>/execute",
-      "confirm": "This bypasses 0 required approvals. Continue?",
+      "confirm": null,
       "tone": "danger",
       "requires_reason": true
     },
