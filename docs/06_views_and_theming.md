@@ -23,8 +23,9 @@ p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: n
 | `stages`            | `[Value::StageProgress]` in position order                               |
 | `actions`           | `[Value::Action]`, one per transition the acting actor could be offered   |
 | `guard(name)`       | the `Guards::*` object behind an action, built once per presenter        |
+| `timeline`          | `[Value::TimelineEntry]`, one per event, oldest first                    |
 
-The timeline and `as_json` arrive with the rest of M5.
+`as_json` arrives with the rest of M5.
 
 A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
 declaration.
@@ -124,6 +125,32 @@ Value::Action(name: :approve, label: "Approve", enabled: false,
 - `guard(:approve)` returns the same object the action was computed from, for anything else on the page
   asking the same question.
 
+### Timeline
+
+```ruby
+Value::TimelineEntry(kind: :overridden, label: "Executed without approval", actor: ActorRef,
+                     body: "Payment provider outage", detail: "1 of 2 approvals",
+                     metadata: { "approvals_present" => 1, "approvals_required" => 2, … },
+                     occurred_at: Time, operation_version: "2026-09-17")
+```
+
+- `body` is what the actor wrote: a comment, a rejection or cancellation reason, an override reason.
+- `detail` is what the gem reads out of `metadata`, for the kinds that have something to say:
+
+  | Kind                                               | `detail`                          |
+  |----------------------------------------------------|-----------------------------------|
+  | `quorum_satisfied`, `stage_satisfied`              | the quorum's label, or the stage's |
+  | `overridden`                                       | "1 of 2 approvals"                |
+  | `reaped`                                           | "Attempt 1, stuck for 2 hours"    |
+  | `execution_started`, `executed`, `execution_failed` | "Attempt 1"                       |
+
+- `metadata` is exactly what the event stored.
+- **The System actor is an ordinary `ActorRef`**, labelled "System", never `deleted?`, with no path.
+  Expiry, the reaper and stage closing render with no branch in your view.
+- `operation_version` is stamped per event from the live declaration, so a declaration that changed
+  mid-request shows as two versions on one timeline.
+- Actors resolve together, one query per actor class, or not at all with `resolve_actors: false`.
+
 ## Labels and translations
 
 Every label is looked up under `change_requests.*` and falls back to the humanized key, so nothing needs a
@@ -148,8 +175,12 @@ en:
       execute_override:
         one: "This bypasses %{count} required approval. Continue?"
         other: "This bypasses %{count} required approvals. Continue?"
-    timeline:
+    timeline:                                # the gem ships a label for every kind
       requested: "Raised"
+    timeline_details:
+      shortfall: "%{present} of %{required} approvals"
+      reaped: "Attempt %{attempt}, stuck for %{stuck_for}"
+      attempt: "Attempt %{attempt}"
     progress:
       remaining: "%{count} from %{who}"
       remaining_more: "%{count} more from %{who}"

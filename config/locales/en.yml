@@ -59,6 +59,30 @@ en:
         one: "This bypasses %{count} required approval. Continue?"
         other: "This bypasses %{count} required approvals. Continue?"
 
+    # Timeline entry labels, one per Event::KINDS entry (§11). Not under `events`, which holds the bodies
+    # below.
+    timeline:
+      requested: "Requested"
+      approved: "Approved"
+      unapproved: "Took back approval"
+      rejected: "Rejected"
+      commented: "Commented"
+      canceled: "Cancelled"
+      quorum_satisfied: "Quorum met"
+      stage_satisfied: "Stage approved"
+      overridden: "Executed without approval"
+      execution_started: "Execution started"
+      executed: "Executed"
+      execution_failed: "Execution failed"
+      expired: "Expired"
+      reaped: "Stuck execution written off"
+      operation_undeclared: "Operation no longer declared"
+
+    timeline_details:
+      shortfall: "%{present} of %{required} approvals"
+      reaped: "Attempt %{attempt}, stuck for %{stuck_for}"
+      attempt: "Attempt %{attempt}"
+
     # Event bodies the gem writes for itself, where there is no actor to supply one. Translatable
     # rather than a hardcoded sentence, with the same fallback every other lookup has (§5.11).
     events:
@@ -76,7 +100,7 @@ en:
     #
     # Presenter values label the same way (§11), each under its own key: `fields.<payload key>`,
     # `statuses.<status>`, `actions.<action>` and `timeline.<event kind>`. `timeline` rather than
-    # `events`, which holds the bodies above. Two status tooltips interpolate:
+    # `events`, which holds the bodies above. Timeline details read `timeline_details.*`. Two status tooltips interpolate:
     # `statuses.expired_tooltip` (%{expires_at}) and `statuses.overridden_tooltip`
     # (%{present}, %{required}, %{reason}). Stage progress reads `progress.remaining`,
     # `progress.remaining_more` (%{count}, %{who}) and `progress.or`. See docs/06_views_and_theming.md.
