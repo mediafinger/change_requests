@@ -42,3 +42,6 @@ than an edit.
 | [0028](0028-sweeps-are-rake-tasks.md) | Sweep with rake tasks, and keep the destructive one off the schedule | Accepted |
 | [0029](0029-actor-references-resolve-lazily-and-degrade.md) | Resolve actor references lazily, in batches, and degrade rather than raise | Accepted |
 | [0030](0030-visibility-is-a-scope.md) | Scope visibility with one relation, undeclared operations first | Accepted |
+| [0031](0031-comment-always-cancel-until-approved.md) | Let anyone comment, and let cancelling end when the last stage closes | Accepted |
+| [0032](0032-presenters-are-domain-core.md) | Present requests from the domain core, as value objects computed from the guards | Accepted |
+| [0033](0033-json-contract-versioned-and-pinned.md) | Publish `as_json` as a versioned contract, held to its document and a golden file | Accepted |

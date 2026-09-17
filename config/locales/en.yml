@@ -13,6 +13,7 @@ en:
       # One key per entry of Guards::Base::REASONS.
       already_decided: "You have already decided this step."
       already_finalized: "This request is already finished."
+      approval_complete: "This request is fully approved and can no longer be cancelled."
       attempts_exhausted: "This request has used all of its attempts."
       body_required: "A comment needs something in it."
       executing: "This request is running right now."

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
-- **Corrected:** 2026-09-16
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -41,6 +41,12 @@ one quorum definition.
 `config.authorization`; a bare `->(actor:, request:, stage:, action:)` is coerced into
 `Authorization::Callable` on assignment, so the host writes a lambda and the gem still has an object
 answering `allows?`.
+
+**Standing is not the same question as counting.** `Guards::Base#eligible_quorums` - which quorums an
+approval may link to - reads only the current stage's **pending** quorums. `#eligible_approver?` - whether
+someone is one of this request's approvers at all, which Cancel asks - reads every quorum of every stage,
+satisfied or not, so an approver keeps their standing once their quorum is met
+([ADR-0031](0031-comment-always-cancel-until-approved.md)).
 
 **The registry's class-level switches hold under any policy.** `t.may_approve = false` refuses in
 `Guards::Base#qualifying` before the policy is consulted, as `t.may_execute` does in

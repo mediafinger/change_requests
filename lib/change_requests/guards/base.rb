@@ -41,6 +41,7 @@ module ChangeRequests
         not_expired
         not_expirable
         not_system
+        approval_complete
       ).freeze
 
       attr_reader :request, :actor, :options
@@ -137,10 +138,11 @@ module ChangeRequests
       end
 
       # §7.2's preamble: "eligible approver" means eligible for at least one quorum on *any* stage of
-      # this request, by permission or by name. A stage-three director may cancel or comment on a
-      # request sitting in stage one. Approve and Reject are the narrower, current-stage question.
+      # this request, by permission or by name, **whether or not that quorum is already satisfied** - an
+      # approver keeps their standing once their quorum is met (M5-8). A stage-three director may cancel
+      # a request sitting in stage one. Approve and Reject are the narrower, current-stage question.
       def eligible_approver?
-        eligible_quorums.any? || eligible_on_another_stage?
+        request.stages.any? { |candidate| qualifying(candidate.quorums).any? }
       end
 
       # §6.9: a stage-three director sitting on a stage-one request is told to wait, not refused.

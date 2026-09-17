@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-11
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -20,6 +21,11 @@ forgot to record it" indistinguishable.
 "System" }`, written into the actor columns like any other actor
 ([ADR-0003](0003-actor-references-as-triples.md)). Columns that may carry it opt in explicitly;
 `System` is otherwise not an acceptable actor type.
+
+Read back, the sentinel is an `ActorRef` like any other
+([ADR-0029](0029-actor-references-resolve-lazily-and-degrade.md)): `system?` is true, it never resolves
+and so never queries, `deleted?` is false and `path` is nil. A timeline renders expiry, the reaper and
+stage closing with no branch on the actor (M5-5).
 
 The id is the non-castable string `"system"`, not `"0"`. Actor ids share a string column with host
 classes that may legitimately have string primary keys, and `"0"` is a value one of them could hold.

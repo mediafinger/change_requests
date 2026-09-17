@@ -144,8 +144,13 @@ Value::Action(name: :approve, label: "Approve", enabled: false,
 
 - **`enabled` and `reason` come from the guard the command enforces with.** A disabled button's tooltip is
   the exact sentence the command would raise, so the two cannot disagree.
-- **`execute_override`** is listed only when the operation declares `op.override`. It is always confirmed
-  ("This bypasses 2 required approvals. Continue?") and posts to Execute's path with `override: true`.
+- **`execute_override`** is listed only when the operation declares `op.override`. It posts to Execute's
+  path with `override: true`, and asks for confirmation ("This bypasses 2 required approvals. Continue?")
+  whenever there is anything to bypass; `confirm` is `nil` otherwise.
+- **`comment`** is enabled for any registered actor, on any request.
+- **`cancel`** is enabled for the requester and for anyone eligible for any quorum on any stage, satisfied
+  or not, until the last stage has closed. An `approved` request answers "This request is fully approved and
+  can no longer be cancelled."; a `failed` one can still be cancelled.
 - `path` is `nil` without `routes:`, and for any action whose route your `config.routes` does not draw.
 - With no `actor:`, `actions` is empty: every guard asks who is acting.
 - `guard(:approve)` returns the same object the action was computed from, for anything else on the page

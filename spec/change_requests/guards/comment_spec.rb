@@ -50,9 +50,24 @@ RSpec.describe ChangeRequests::Guards::Comment do
       expect(described_class.new(request: change_request, actor: director)).to be_allowed
     end
 
-    it "refuses an actor who is neither" do
-      expect(described_class.new(request: change_request, actor: Admin.create!(name: "Sam")).reason)
-        .to eq(:not_permitted)
+    # M5-8: a comment writes no lifecycle state, and `visible_to` already decides who sees the request.
+    it "allows any registered actor, with no standing at all" do
+      expect(described_class.new(request: change_request, actor: Admin.create!(name: "Sam"))).to be_allowed
+    end
+
+    it "allows an approver whose approval closed the only stage" do
+      ChangeRequests.operations["members.update_roles"].workflow do |w|
+        w.stage :approval, permissions: %w(member_admin), threshold: 1
+      end
+      request = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles", requester: requester)
+      ChangeRequests::Commands::Approve.call(request: request, actor: actor)
+
+      expect(described_class.new(request: request.reload, actor: actor)).to be_allowed
+    end
+
+    it "still refuses an unregistered actor class, which is the allowlist rather than a reason" do
+      expect { described_class.new(request: change_request, actor: Object.new).reason }
+        .to raise_error(ChangeRequests::UnknownActorType)
     end
   end
 
@@ -82,36 +97,8 @@ RSpec.describe ChangeRequests::Guards::Comment do
     end
   end
 
-  # Guards::Base#check! builds whichever class a guard declared with request: and reason:. Before
-  # NotAuthorized carried them, Ruby folded the keywords into the message and the reason vanished.
-  describe "the error it raises" do
-    subject(:guard) { described_class.new(request: change_request, actor: Admin.create!(name: "Sam")) }
-
-    it "carries the reason hosts branch on" do
-      expect { guard.check! }.to raise_error(ChangeRequests::NotAuthorized) { |error|
-        expect(error.reason).to eq(:not_permitted)
-      }
-    end
-
-    it "carries the request" do
-      expect { guard.check! }.to raise_error(ChangeRequests::NotAuthorized) { |error|
-        expect(error.request).to eq(change_request)
-      }
-    end
-
-    it "reads as the refusal, not as an inspected hash" do
-      expect { guard.check! }
-        .to raise_error(ChangeRequests::NotAuthorized, "You are not one of this request's approvers.")
-    end
-
-    # §8 keeps the two apart: "may never" is not "not yet", and a host rescues them separately.
-    it "is not a TransitionError" do
-      expect { guard.check! }.to raise_error(ChangeRequests::NotAuthorized)
-      expect(ChangeRequests::NotAuthorized.ancestors).not_to include(ChangeRequests::TransitionError)
-    end
-
-    it "is still a ChangeRequests::Error, so one rescue_from catches everything" do
-      expect { guard.check! }.to raise_error(ChangeRequests::Error)
-    end
+  it "has no refusal left, so check! returns the request for anyone" do
+    expect(described_class.new(request: change_request, actor: Admin.create!(name: "Sam")).check!)
+      .to eq(change_request)
   end
 end

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-11
-- **Corrected:** 2026-09-16
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -13,8 +13,9 @@ one class, one key type, and would take the audit trail down with the record.
 
 ## Decision
 
-Every actor reference is three columns: `*_type`, `*_id` and, where a decision was recorded,
-`*_label`.
+Every actor reference is three columns: `*_type`, `*_id` and `*_label`. Named-approver rows carry a
+label too, although nobody has decided anything yet, so "1 more from Cleo or Gene" renders from the row
+alone (M5-3).
 
 - `*_id` is a **string** column, so heterogeneous primary key types share it.
 - `*_type` is validated against `ChangeRequests.config.actor_types`, a registry the host declares.

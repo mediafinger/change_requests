@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -27,6 +28,12 @@ Wording lives in `config/locales/en.yml` and nowhere else.
   resolve through `change_requests.stages.<name>` / `change_requests.quorums.<name>` with
   `name.humanize` as the fallback, so a host that declares `sign_off` reads "Sign off" with no locale
   entry at all.
+
+Presenter wording follows the same rule, each under its own key with `humanize` as the fallback:
+`fields`, `statuses`, `actions`, `confirmations`, `timeline`, `timeline_details` and `progress`. The gem
+ships entries for what it names itself (statuses' tooltips, every action, every event kind) and none for
+what the host names (stages, quorums, payload keys). Translations interpolate `%{name}`, into the default
+too when I18n is absent.
 
 A spec holds the vocabulary and the locale file to each other **in both directions**: every reason
 must have a translation, and every translation must correspond to a reason or to an error class that
