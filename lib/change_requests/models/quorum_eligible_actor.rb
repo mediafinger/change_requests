@@ -13,7 +13,8 @@ module ChangeRequests
                         foreign_key: :change_request_quorum_id,
                         inverse_of: :eligible_actors
 
-    # No label: these rows name who *may* approve, not a decision that has been made.
-    actor_reference :actor, label: false
+    # Labelled, although nobody has decided anything yet: "1 more from Cleo or Gene" has to render from
+    # the row, with no query and after the actor is gone, like every other reference (M5-3).
+    actor_reference :actor
   end
 end

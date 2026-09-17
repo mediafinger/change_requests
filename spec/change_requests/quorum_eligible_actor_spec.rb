@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe ChangeRequests::QuorumEligibleActor do
-  subject(:eligible_actor) { quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42") }
+  subject(:eligible_actor) { quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42", actor_label: "Named") }
 
   let(:change_request) do
     ChangeRequests::Request.create!(
@@ -22,21 +22,43 @@ RSpec.describe ChangeRequests::QuorumEligibleActor do
 
   describe "validations" do
     it "requires an actor type" do
-      expect(quorum.eligible_actors.build(actor_type: nil, actor_id: "42")).not_to be_valid
+      expect(quorum.eligible_actors.build(actor_type: nil, actor_id: "42", actor_label: "Named")).not_to be_valid
     end
 
     it "requires an actor id" do
-      expect(quorum.eligible_actors.build(actor_type: "Admin", actor_id: nil)).not_to be_valid
+      expect(quorum.eligible_actors.build(actor_type: "Admin", actor_id: nil, actor_label: "Named")).not_to be_valid
+    end
+
+    # M5-3 renders "1 more from Cleo or Gene" from the row alone, as every other actor reference does.
+    it "requires a label" do
+      expect(quorum.eligible_actors.build(actor_type: "Admin", actor_id: "42", actor_label: nil)).not_to be_valid
     end
 
     it "rejects a class that is not registered" do
-      expect(quorum.eligible_actors.build(actor_type: "Robot", actor_id: "42")).not_to be_valid
+      expect(quorum.eligible_actors.build(actor_type: "Robot", actor_id: "42", actor_label: "Named")).not_to be_valid
     end
 
     it "accepts each registered class" do
       %w(User Admin Manager).each do |actor_type|
-        expect(quorum.eligible_actors.build(actor_type: actor_type, actor_id: "1")).to be_valid
+        expect(quorum.eligible_actors.build(actor_type: actor_type, actor_id: "1", actor_label: "Named")).to be_valid
       end
+    end
+  end
+
+  describe "assigning an actor" do
+    it "snapshots the label through the actor type's registration (§5.7)" do
+      admin = Admin.create!(name: "Cleo")
+
+      expect(quorum.eligible_actors.create!(actor: admin).reload)
+        .to have_attributes(actor_type: "Admin", actor_id: admin.id.to_s, actor_label: "Cleo (admin)")
+    end
+
+    it "reads back as an ActorRef carrying the snapshot" do
+      admin = Admin.create!(name: "Cleo")
+      row = quorum.eligible_actors.create!(actor: admin)
+      admin.destroy!
+
+      expect(row.reload.actor).to have_attributes(label: "Cleo (admin)", deleted?: true)
     end
   end
 
@@ -44,21 +66,21 @@ RSpec.describe ChangeRequests::QuorumEligibleActor do
   describe "actor_id" do
     it "stores a uuid" do
       user = User.create!(name: "Ada", email: "ada@example.com")
-      row = quorum.eligible_actors.create!(actor_type: "User", actor_id: user.id)
+      row = quorum.eligible_actors.create!(actor_type: "User", actor_id: user.id, actor_label: "Named")
 
       expect(row.reload.actor_id).to eq(user.id)
     end
 
     it "stores a bigint as text" do
       admin = Admin.create!(name: "Grace")
-      row = quorum.eligible_actors.create!(actor_type: "Admin", actor_id: admin.id.to_s)
+      row = quorum.eligible_actors.create!(actor_type: "Admin", actor_id: admin.id.to_s, actor_label: "Named")
 
       expect(row.reload.actor_id).to eq(admin.id.to_s)
     end
 
     it "stores a string key unchanged" do
       Manager.create!(id: "mgr-1", name: "Alan")
-      row = quorum.eligible_actors.create!(actor_type: "Manager", actor_id: "mgr-1")
+      row = quorum.eligible_actors.create!(actor_type: "Manager", actor_id: "mgr-1", actor_label: "Named")
 
       expect(row.reload.actor_id).to eq("mgr-1")
     end
@@ -68,7 +90,7 @@ RSpec.describe ChangeRequests::QuorumEligibleActor do
     it "refuses the same actor twice in one quorum" do
       eligible_actor
 
-      expect { quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42") }
+      expect { quorum.eligible_actors.create!(actor_type: "Admin", actor_id: "42", actor_label: "Named") }
         .to raise_error(ActiveRecord::RecordNotUnique)
     end
 
@@ -76,14 +98,14 @@ RSpec.describe ChangeRequests::QuorumEligibleActor do
     it "treats the same id under a different class as a different actor" do
       eligible_actor
 
-      expect { quorum.eligible_actors.create!(actor_type: "User", actor_id: "42") }.not_to raise_error
+      expect { quorum.eligible_actors.create!(actor_type: "User", actor_id: "42", actor_label: "Named") }.not_to raise_error
     end
 
     it "allows the same actor in another quorum" do
       eligible_actor
       other = stage.quorums.create!(position: 2, threshold: 1, name: "others")
 
-      expect { other.eligible_actors.create!(actor_type: "Admin", actor_id: "42") }.not_to raise_error
+      expect { other.eligible_actors.create!(actor_type: "Admin", actor_id: "42", actor_label: "Named") }.not_to raise_error
     end
   end
 

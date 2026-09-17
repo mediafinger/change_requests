@@ -20,8 +20,9 @@ p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: n
 | `status`            | `Value::Status(key:, label:, tone:, tooltip:)`                           |
 | `payload_fields`    | `[Value::Field(key:, label:, value:)]`, alphabetical by key              |
 | `payload_preview`   | the first `config.payload_preview_limit` of `payload_fields`             |
+| `stages`            | `[Value::StageProgress]` in position order                               |
 
-Stages, actions, the timeline and `as_json` arrive with the rest of M5.
+Actions, the timeline and `as_json` arrive with the rest of M5.
 
 A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
 declaration.
@@ -71,6 +72,28 @@ naming the approvals it had, the approvals it needed and the override reason.
 
 Tones are a closed set: `neutral`, `primary`, `success`, `warning`, `danger`.
 
+### Stages
+
+```ruby
+Value::StageProgress(name: "operational", label: "Operational", position: 1, status: :pending,
+                     satisfied?: false, current?: true, satisfied_by: :any_quorum, satisfied_via: nil,
+                     remaining_options: ["1 from Admin", "1 more from Owners"],
+                     quorums: [Value::Quorum(name: "admin",  label: "Admin",  required: 1, approved: 0, approvers: []),
+                               Value::Quorum(name: "owners", label: "Owners", required: 2, approved: 1, approvers: ["Olga"])])
+```
+
+- **`approved` counts distinct people.** Under `all_quorums` one approval counts toward one quorum, so an
+  Admin who also holds `owner` never fills both.
+- **`remaining_options`** has one entry per quorum still short, and is empty unless the stage is `pending`.
+  Join the entries with **or** under `satisfied_by: :any_quorum` and **and** under `:all_quorums`:
+  "1 from Admin, or 1 more from Owners" is honest where "1/2" is not.
+- A quorum that only **names** its approvers lists the ones who have not decided yet: "1 more from Gene".
+- `satisfied_via` names the quorum that closed an `any_quorum` stage. It is `nil` for `all_quorums`, where
+  every quorum did.
+- `approvers` and named actors come from labels stored on the rows, so stages render in full with
+  `resolve_actors: false` and after an approver is deleted.
+- `current?` is the stage a pending request is waiting on. A finished request has none.
+
 ## Labels and translations
 
 Every label is looked up under `change_requests.*` and falls back to the humanized key, so nothing needs a
@@ -93,6 +116,10 @@ en:
       execute_override: "Execute without approval"
     timeline:
       requested: "Raised"
+    progress:
+      remaining: "%{count} from %{who}"
+      remaining_more: "%{count} more from %{who}"
+      or: "or"
 ```
 
 Tooltip times are ISO8601 UTC. Format them for display in your view.

@@ -63,4 +63,5 @@ en:
     # `statuses.<status>`, `actions.<action>` and `timeline.<event kind>`. `timeline` rather than
     # `events`, which holds the bodies above. Two status tooltips interpolate:
     # `statuses.expired_tooltip` (%{expires_at}) and `statuses.overridden_tooltip`
-    # (%{present}, %{required}, %{reason}). See docs/06_views_and_theming.md.
+    # (%{present}, %{required}, %{reason}). Stage progress reads `progress.remaining`,
+    # `progress.remaining_more` (%{count}, %{who}) and `progress.or`. See docs/06_views_and_theming.md.

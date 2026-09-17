@@ -124,6 +124,7 @@ class CreateChangeRequests < ActiveRecord::Migration[<%= migration_version %>]
 
       t.string :actor_type, null: false
       t.string :actor_id, null: false
+      t.string :actor_label, null: false
     end
 
     add_index :change_request_quorum_eligible_actors, %i(change_request_quorum_id actor_type actor_id), unique: true, name: "index_change_request_quorum_eligible_actors_unique"

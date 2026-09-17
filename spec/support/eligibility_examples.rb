@@ -136,7 +136,7 @@ RSpec.shared_examples "the eligibility predicate" do
 
     it "separates the same id held by two different classes" do
       quorum = build_quorum(stage)
-      quorum.eligible_actors.create!(actor_type: "User", actor_id: plain_admin.id.to_s)
+      quorum.eligible_actors.create!(actor_type: "User", actor_id: plain_admin.id.to_s, actor_label: "Ada")
 
       expect(eligible?(actor: plain_admin, quorum: quorum.reload)).to be(false)
     end

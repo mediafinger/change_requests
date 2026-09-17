@@ -21,22 +21,19 @@ module ChangeRequests
       extend ActiveSupport::Concern
 
       class_methods do
-        # `label: false` for a reference that names who *may* act rather than who did - the
-        # eligibility rows carry no snapshot, because nothing has happened yet to snapshot.
-        #
         # `identity: true` also snapshots `config.actor_identity`, which is what lets the gem tell
         # that Admin#7 and User#99 are one human. Null unless the host configured it (§9.4).
         def actor_reference(prefix, optional: false, allow_system: false, registry: :actor_types,
-                            label: true, identity: false)
+                            identity: false)
           declare_type_validation(prefix, optional: optional, allow_system: allow_system,
                                           registry: registry)
 
           unless optional
             validates :"#{prefix}_id", presence: true
-            validates :"#{prefix}_label", presence: true if label
+            validates :"#{prefix}_label", presence: true
           end
 
-          define_actor_accessors(prefix, registry: registry, label: label, identity: identity)
+          define_actor_accessors(prefix, registry: registry, identity: identity)
         end
 
         # QuorumPermission carries a type and nothing else: NULL there means "any registered class".
@@ -60,7 +57,7 @@ module ChangeRequests
                     allow_nil: true
         end
 
-        def define_actor_accessors(prefix, registry:, label:, identity:)
+        def define_actor_accessors(prefix, registry:, identity:)
           generated = Module.new do
             # No `*_id=` override: the column is a string, so ActiveRecord already casts on
             # assignment. A User with a uuid key and an Admin with a bigint key share it (§5.7).
@@ -69,8 +66,7 @@ module ChangeRequests
 
               return nil if type.blank?
 
-              columns = {}
-              columns[:label] = public_send(:"#{prefix}_label") if label
+              columns = { label: public_send(:"#{prefix}_label") }
               columns[:identity] = public_send(:"#{prefix}_identity") if identity
 
               ActorRef.new(type: type, id: public_send(:"#{prefix}_id"), **columns)
@@ -85,7 +81,7 @@ module ChangeRequests
 
               public_send(:"#{prefix}_type=", attributes[:type])
               public_send(:"#{prefix}_id=", attributes[:id])
-              public_send(:"#{prefix}_label=", attributes[:label]) if label
+              public_send(:"#{prefix}_label=", attributes[:label])
               public_send(:"#{prefix}_identity=", ChangeRequests.config.actor_identity&.call(actor)) \
                 if identity && actor
             end
