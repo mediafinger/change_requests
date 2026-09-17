@@ -30,6 +30,33 @@ p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: n
 A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
 declaration.
 
+### A page of requests
+
+```ruby
+page = ChangeRequests::CollectionPresenter.new(
+  ChangeRequests::Request.visible_to(current_user).order(created_at: :desc).limit(25),
+  actor: current_user, routes: self,
+)
+
+page.each { |p| p.operation_label; p.requester.label; p.status; p.stages }
+```
+
+`CollectionPresenter` owns eager loading, so a page costs a fixed number of queries however many rows it
+has:
+- one for the requests;
+- eight for what every presenter reads: stages, quorums, permissions, named approvers, approval links,
+  approvals, events, attempts;
+- one per actor class across every requester, executer, tenant and timeline actor on the page.
+
+25 requests raised by Users, Admins and Managers in one Organization cost 13 queries, and so do 5.
+
+Each presenter it yields is indistinguishable from `RequestPresenter.new(request, …)`. It already has its
+associations loaded and its actors resolved. `resolve_actors: false` skips the actor queries and still
+labels everyone.
+
+`actions` is not preloaded: each guard asks its own questions, so an index that renders buttons pays for
+them per row.
+
 ### Actors
 
 `requester`, `executer` and `tenant` resolve together on first read: one query per actor class, then none.

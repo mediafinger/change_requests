@@ -125,6 +125,28 @@ RSpec.describe ChangeRequests::RequestPresenter do
       end
     end
 
+    # The seam CollectionPresenter resolves a page through.
+    describe "#actor_refs" do
+      it "is every ref the presenter renders, unresolved, built once" do
+        ChangeRequests::Commands::Comment.call(request: change_request, actor: requester, body: "Note")
+        presenter = described_class.new(change_request.reload, actor: nil)
+
+        expect(presenter.actor_refs.map(&:type)).to eq(%w(User User User))
+        expect(presenter.actor_refs.map(&:resolution_known?)).to all(be(false))
+        first = presenter.actor_refs.first
+
+        expect(presenter.actor_refs.first).to be(first)
+      end
+
+      it "leaves the presenter nothing to query once something else resolved them" do
+        presenter = described_class.new(change_request.reload, actor: nil)
+        ChangeRequests::ActorResolver.call(presenter.actor_refs)
+
+        expect { [presenter.requester.record, presenter.timeline.map { |row| row.actor.record }] }
+          .to issue_no_queries
+      end
+    end
+
     describe "resolve_actors: false" do
       subject(:presenter) { described_class.new(tenanted, actor: nil, resolve_actors: false) }
 

@@ -141,6 +141,8 @@ report :presenter_refusal, presenter.actions.first.reason
 report :presenter_timeline, presenter.timeline.map { |row|
   "#{row.kind}:#{row.actor.label}#{":#{row.detail}" if row.detail}"
 }.join(",")
+page = ChangeRequests::CollectionPresenter.new(ChangeRequests::Request.where(id: request.id), actor: nil)
+report :collection, page.map { |row| "#{row.operation_label}/#{row.requester.label}/#{row.requester.deleted?}" }.join(",")
 report :presenter_stages, presenter.stages.map { |stage|
   "#{stage.label}:#{stage.status}:#{stage.quorums.sole.approvers.join("+")}"
 }.join(",")
