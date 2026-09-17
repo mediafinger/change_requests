@@ -56,6 +56,11 @@ RSpec.describe "the domain core, headless" do
                                "approved:Edith Clarke,quorum_satisfied:System:Approval,stage_satisfied:System:Approval")
     end
 
+    # HeadlessActor has no `where`, so a page resolves it to nothing - and still labels it.
+    it "presents a page of requests" do
+      expect(probe).to include("collection=Members::UpdateRoles.call/Ada Lovelace/true")
+    end
+
     it "presents stage progress from the approval rows" do
       expect(probe).to include("presenter_stages=Approval:closed:Grace Hopper+Edith Clarke")
     end
