@@ -42,6 +42,10 @@ RSpec.describe "the domain core, headless" do
                                'presenter_preview=Member=7,Roles=["editor"]')
     end
 
+    it "presents stage progress from the approval rows" do
+      expect(probe).to include("presenter_stages=Approval:closed:Grace Hopper+Edith Clarke")
+    end
+
     it "labels actors from the row with resolve_actors: false" do
       expect(probe).to include("presenter_requester=Ada Lovelace")
     end

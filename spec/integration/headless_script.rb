@@ -136,6 +136,9 @@ report :presenter_status, "#{presenter.status.key}/#{presenter.status.tone}"
 report :presenter_operation, presenter.operation_label
 report :presenter_preview, presenter.payload_preview.map { |field| "#{field.label}=#{field.value}" }.join(",")
 report :presenter_requester, presenter.requester.label
+report :presenter_stages, presenter.stages.map { |stage|
+  "#{stage.label}:#{stage.status}:#{stage.quorums.sole.approvers.join("+")}"
+}.join(",")
 
 begin
   resolving = ChangeRequests::RequestPresenter.new(request, actor: first)

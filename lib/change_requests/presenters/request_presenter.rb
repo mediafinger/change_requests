@@ -83,7 +83,93 @@ module ChangeRequests
       end
     end
 
+    # §11, §7.1. One per stage in position order. `approved` counts the approval_quorums links, so an
+    # all_quorums stage never shows as met by fewer distinct people than it needs.
+    def stages
+      @stages ||= begin
+        preload_progress
+
+        request.stages.sort_by(&:position).map { |stage| stage_progress(stage) }
+      end
+    end
+
     private
+
+    PROGRESS = {
+      stages: { quorums: [:permissions, :eligible_actors, { approval_quorums: :approval }] },
+    }.freeze
+    private_constant :PROGRESS
+
+    # Leaves anything already loaded alone, so M5-6's collection preload costs nothing here.
+    def preload_progress
+      ActiveRecord::Associations::Preloader.new(records: [request], associations: [PROGRESS, :events]).call
+    end
+
+    def stage_progress(stage)
+      Value::StageProgress.new(
+        name: stage.name, label: stage.label, position: stage.position, status: stage.status.to_sym,
+        satisfied: stage.satisfied? || stage.closed?, current: current_stage?(stage),
+        satisfied_by: stage.satisfied_by.to_sym, satisfied_via: satisfied_via(stage),
+        remaining_options: remaining_options(stage),
+        quorums: stage.quorums.sort_by(&:position).map { |quorum| quorum_progress(quorum) }
+      )
+    end
+
+    def quorum_progress(quorum)
+      Value::Quorum.new(name: quorum.name, label: quorum.label, required: quorum.threshold,
+                        approved: quorum.approval_quorums.size, satisfied: quorum.satisfied?,
+                        approvers: linked_approvals(quorum).map(&:approver_label))
+    end
+
+    # Snapshots, not live labels: who approved, as they were named when they did.
+    def linked_approvals(quorum)
+      quorum.approval_quorums.map(&:approval).sort_by(&:decided_at)
+    end
+
+    def current_stage?(stage)
+      request.pending? && stage.position == request.current_stage_position
+    end
+
+    # Only an any_quorum stage closes through one route. stage_satisfied already records which (§7.1).
+    def satisfied_via(stage)
+      return unless stage.closed? && stage.any_quorum?
+
+      event = request.events.to_a.rfind { |row| row.kind == "stage_satisfied" && row.metadata["stage"] == stage.name }
+
+      event&.metadata&.fetch("quorum", nil)
+    end
+
+    # "2 more from Owners", one per quorum still short. The view joins them with "or" under
+    # any_quorum and "and" under all_quorums; `satisfied_by` says which.
+    def remaining_options(stage)
+      return [] unless stage.pending?
+
+      decided = stage.quorums.flat_map { |quorum| quorum.approval_quorums.map(&:approval) }
+                     .to_set { |approval| [approval.approver_type, approval.approver_id] }
+
+      stage.quorums.sort_by(&:position).reject(&:satisfied?).map do |quorum|
+        remaining_option(quorum, decided)
+      end
+    end
+
+    def remaining_option(quorum, decided)
+      approved = quorum.approval_quorums.size
+      key = approved.zero? ? "remaining" : "remaining_more"
+      default = approved.zero? ? "%{count} from %{who}" : "%{count} more from %{who}"
+
+      Translation.translate("change_requests.progress.#{key}", default: default,
+                                                               count: quorum.threshold - approved,
+                                                               who: remaining_who(quorum, decided))
+    end
+
+    # A quorum that only names people lists who is left of them (M9a-3). Anything else is its label.
+    def remaining_who(quorum, decided)
+      return quorum.label unless quorum.permissions.empty? && quorum.eligible_actors.any?
+
+      quorum.eligible_actors.reject { |row| decided.include?([row.actor_type, row.actor_id]) }
+            .map(&:actor_label)
+            .join(" #{Translation.translate("change_requests.progress.or", default: "or")} ")
+    end
 
     # Resolved together on first read: one query per actor type across all three, then none.
     def actors
