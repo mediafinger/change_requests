@@ -74,6 +74,32 @@ RSpec.describe ChangeRequests::Guards::Base do
     end
   end
 
+  # M5-4: a disabled button's tooltip is the sentence the command would have raised.
+  describe "#message" do
+    it "is nil when nothing refuses" do
+      expect(guard.message).to be_nil
+    end
+
+    it "is the message check! raises" do
+      change_request.update!(status: "approved")
+      guard = GuardProbes::Fussy.new(request: change_request, actor: actor)
+      raised = begin
+        guard.check!
+      rescue ChangeRequests::Error => e
+        e.message
+      end
+
+      expect(guard.message).to eq(raised).and eq("This request is no longer open for decisions.")
+    end
+
+    it "is translated as the error is" do
+      change_request.update!(status: "approved")
+      with_translations("change_requests.errors.not_pending" => "Closed.")
+
+      expect(GuardProbes::Fussy.new(request: change_request, actor: actor).message).to eq("Closed.")
+    end
+  end
+
   describe "the undeclared-operation refusal (§5.11)" do
     it "refuses before the subclass is consulted, so no guard has to repeat it" do
       ChangeRequests.operations.clear

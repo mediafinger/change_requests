@@ -97,7 +97,12 @@ module ChangeRequests
       def check!
         return request if allowed?
 
-        fail error_for(reason).new(request: request, reason: reason)
+        fail refusal_error
+      end
+
+      # The sentence check! would raise, built by the same error, so a tooltip and a flash agree.
+      def message
+        refusal_error&.message
       end
 
       # Subclasses override. nil permits.
@@ -172,6 +177,12 @@ module ChangeRequests
       end
 
       private
+
+      def refusal_error
+        refused = reason
+
+        error_for(refused).new(request: request, reason: refused) if refused
+      end
 
       def error_for(reason)
         REASON_ERRORS.fetch(reason) { self.class.error_class }
