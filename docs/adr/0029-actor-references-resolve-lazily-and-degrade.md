@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-16
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -28,8 +29,18 @@ type, calls each finder once with every cast id, and fills each ref through `res
 ref resolving itself uses the same `cast_id` and `finder`, so the two paths cannot disagree.
 
 **Resolution degrades, never raises.** An unregistered type, a class the application no longer
-defines, an uncastable id and a deleted record all resolve to `nil`. The ref reports `deleted?`, its
-`label` falls back to the snapshot, and `path` returns `nil`.
+defines, a class with no `where` and no `finder` (a plain Ruby actor), an uncastable id and a deleted
+record all resolve to `nil`. The ref reports `deleted?`, its `label` falls back to the snapshot, and
+`path` returns `nil` - as it does for a tenant, whose registration declares no path.
+
+**Not resolving is a state of its own.** `ActorRef#without_resolution` answers from the row under
+either label strategy, never queries, and reports `deleted?` false, because nobody looked.
+`RequestPresenter.new(resolve_actors: false)` builds every ref that way. The System sentinel is
+constructed that way always ([ADR-0011](0011-system-sentinel-actor.md)).
+
+**The collection resolves, the presenter reads.** `RequestPresenter#actor_refs` builds every ref a
+presenter renders, unresolved; `CollectionPresenter` passes a page's worth to one `ActorResolver.call`,
+and each presenter then finds its refs answered ([ADR-0032](0032-presenters-are-domain-core.md)).
 
 `config.actor_label_strategy` chooses between `:live`, which resolves and falls back to the snapshot,
 and `:snapshot`, which never resolves for a label.
@@ -46,6 +57,8 @@ and `:snapshot`, which never resolves for a label.
 
 ### Negative
 
+- The approver labels in stage progress are always snapshots, while a timeline actor's label follows
+  the strategy. Under `:live` the same person can read differently in the two places.
 - Degrading hides misconfiguration. A typo in a registered class name renders every such actor as
   deleted rather than failing. Neither `verify!` nor a registration's `problems` checks that the class
   exists.

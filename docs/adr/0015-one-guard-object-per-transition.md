@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-09-12
+- **Corrected:** 2026-09-17
 
 ## Context
 
@@ -17,15 +18,18 @@ no standing at all. Which of those a person is told is the whole of the user exp
 ## Decision
 
 One guard class per transition, under `lib/change_requests/guards/`, constructed as
-`(request:, actor:, **options)`. It answers `allowed?`, `reason` and `check!`, and both the command
-and the presenter build the same object.
+`(request:, actor:, **options)`. It answers `allowed?`, `reason`, `message` and `check!`, and both the
+command and the presenter build the same object. `message` is the sentence `check!` would raise, built by
+the same error class, so a disabled button's tooltip and a flash cannot word the refusal differently.
+`RequestPresenter#guard(name)` builds each guard once per presenter and computes `actions` from it (M5-4).
 
 - A subclass implements `refusal`, which returns `nil` to permit or a symbol from
   `Guards::Base::REASONS`, the closed shared vocabulary. Branch order inside `refusal` is part of
   the contract: it decides which of several true refusals the person is shown.
 - `refuses_with` declares the error class, rather than deriving it from the guard's name —
   `Comment`, `Expire` and `Reap` refuse with `NotAuthorized`, the decision guards with their own
-  `TransitionError` ([ADR-0012](0012-declared-error-taxonomy.md)).
+  `TransitionError` ([ADR-0012](0012-declared-error-taxonomy.md)). `Comment` declares one but refuses
+  nothing any more ([ADR-0031](0031-comment-always-cancel-until-approved.md)).
 - Two reasons override that declaration, through `Guards::Base::REASON_ERRORS`.
   `:already_finalized` always raises `AlreadyFinalized`, whichever guard produced it, so a host
   rescuing "this request is over" catches every command — the same class and reason the model's

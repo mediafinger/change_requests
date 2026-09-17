@@ -50,6 +50,9 @@ ChangeRequests::SYSTEM_ACTOR  # => { type: "System", id: "system", label: "Syste
 The actor triple is `NOT NULL` on every row, so nothing reading the trail has to branch on nil.
 `Event.by_system` scopes to them; `event.system_actor?` identifies one.
 
+`event.actor` is an `ActorRef` like any other: `system?` is true, it never queries, `deleted?` is false
+and `path` is nil. A timeline renders it with no special case.
+
 The id is the word `system`, not `0`: `*_id` is a string column shared with host actor classes that
 may have string primary keys, and `0` is a value one of those could legitimately hold.
 
@@ -75,6 +78,9 @@ quorum_satisfied  stage_satisfied  stage_closed  overridden
 execution_started  executed  execution_failed
 expired  reaped  operation_undeclared
 ```
+
+Every kind has a label under `change_requests.timeline.<kind>` in the gem's `en.yml`, which
+`RequestPresenter#timeline` reads ([docs/06](06_views_and_theming.md#timeline)).
 
 Enforced by an inclusion validation, with **no** CHECK constraint: later releases add kinds, and a
 CHECK would make each one a migration in every host application.

@@ -46,7 +46,17 @@ ref = request.requester
 ref.label      # the live label if the record still exists, else the one recorded at the time
 ref.deleted?   # true once the record is gone - render "(deleted)" with no link
 ref.record     # the object, or nil; never raises
+ref.path(view) # the registered `t.path`, or nil without routes, a record or a lambda
 ```
+
+Nothing that fails to resolve raises: a deleted record, an id that no longer casts to the key type, a
+class the application no longer defines, and a plain Ruby actor class that has no `finder`. Each one reads
+as `deleted?`. Pass `resolve_actors: false` to a presenter to skip resolution entirely. Refs are then
+answered from the stored row, and `deleted?` is false because nothing looked.
+
+**Comment** is open to any registered actor. **Cancel** is open to the requester and to anyone eligible
+for any quorum on any stage, satisfied or not, until the last stage has closed, or at any time after a
+failed execution. See [docs/06](06_views_and_theming.md#actions).
 
 ## What may they do: the default policy
 

@@ -57,6 +57,14 @@ does not try.
 execution is claimed and settled, inline against background mode, and the two maintenance tasks that
 belong on a crontab.
 
+## Presenting requests
+
+`ChangeRequests::RequestPresenter` and `CollectionPresenter` turn requests into value objects for any view,
+API or job: labels, status, stage progress, actions computed from the same guards the commands use, and a
+timeline. A page of requests costs a fixed number of queries. `as_json` is a versioned contract.
+[docs/06_views_and_theming.md](docs/06_views_and_theming.md) documents both, and
+[docs/04_authorization.md](docs/04_authorization.md) covers actors, policies and visibility.
+
 ## Architecture
 
 The decisions behind the gem's shape — and what each one costs — are recorded as ADRs in
