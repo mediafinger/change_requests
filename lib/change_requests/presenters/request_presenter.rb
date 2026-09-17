@@ -22,6 +22,14 @@ module ChangeRequests
 
     CANCELING_KINDS = %w(canceled operation_undeclared).freeze
 
+    # Every association a presenter reads. CollectionPresenter preloads it for a page; a lone presenter
+    # loads what it needs, and Preloader skips whatever is already there.
+    PRELOAD = [
+      { stages: { quorums: [:permissions, :eligible_actors, { approval_quorums: :approval }] } },
+      :events,
+      :attempts,
+    ].freeze
+
     # One per transition a host can offer, in display order (§7, §8.1). `route` is the member path the
     # engine draws; an override posts to Execute's.
     ACTIONS = {
@@ -109,13 +117,17 @@ module ChangeRequests
     # all with resolve_actors: false. System entries need no branch: the sentinel is never deleted.
     def timeline
       @timeline ||= begin
-        events = request.events.to_a
-        refs = events.map(&:actor)
+        ActorResolver.call(event_refs) if resolve_actors?
 
-        resolve_actors? ? ActorResolver.call(refs) : refs.map!(&:without_resolution)
-
-        events.zip(refs).map { |event, ref| timeline_entry(event, ref) }
+        request.events.to_a.zip(event_refs).map { |event, ref| timeline_entry(event, ref) }
       end
+    end
+
+    # Every actor reference this presenter renders, built once and unresolved until something resolves
+    # them. CollectionPresenter resolves a whole page's worth in one query per actor type (§11); a
+    # presenter then finds its refs already answered and queries nothing.
+    def actor_refs
+      actor_slots.values.compact + event_refs
     end
 
     # §7: each enabled flag and reason is the guard's own answer, so the button and the command agree.
@@ -229,14 +241,9 @@ module ChangeRequests
                                                                                          count: missing)
     end
 
-    PROGRESS = {
-      stages: { quorums: [:permissions, :eligible_actors, { approval_quorums: :approval }] },
-    }.freeze
-    private_constant :PROGRESS
-
-    # Leaves anything already loaded alone, so M5-6's collection preload costs nothing here.
+    # Leaves anything already loaded alone, so a collection's preload costs nothing here.
     def preload_progress
-      ActiveRecord::Associations::Preloader.new(records: [request], associations: [PROGRESS, :events]).call
+      ActiveRecord::Associations::Preloader.new(records: [request], associations: PRELOAD.first(2)).call
     end
 
     def stage_progress(stage)
@@ -307,16 +314,20 @@ module ChangeRequests
 
     # Resolved together on first read: one query per actor type across all three, then none.
     def actors
-      @actors ||= begin
-        refs = { requester: request.requester, executer: request.executer, tenant: request.tenant }
+      @actors ||= actor_slots.tap { |slots| ActorResolver.call(slots.values.compact) if resolve_actors? }
+    end
 
-        if resolve_actors?
-          ActorResolver.call(refs.values.compact)
-          refs
-        else
-          refs.transform_values { |ref| ref&.without_resolution }
-        end
-      end
+    def actor_slots
+      @actor_slots ||= { requester: request.requester, executer: request.executer, tenant: request.tenant }
+                       .transform_values { |ref| built_ref(ref) }
+    end
+
+    def event_refs
+      @event_refs ||= request.events.map { |event| built_ref(event.actor) }
+    end
+
+    def built_ref(ref)
+      resolve_actors? ? ref : ref&.without_resolution
     end
 
     # §8.1: a request that ran without its approvals says so, unless the run failed.
