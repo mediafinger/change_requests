@@ -123,6 +123,11 @@ module ChangeRequests
       end
     end
 
+    # The documented JSON contract (docs/06), for any front end that is not the engine's views.
+    def as_json(_options = nil)
+      JsonContract.request(self)
+    end
+
     # Every actor reference this presenter renders, built once and unresolved until something resolves
     # them. CollectionPresenter resolves a whole page's worth in one query per actor type (§11); a
     # presenter then finds its refs already answered and queries nothing.

@@ -90,8 +90,10 @@ module ChangeRequests
     # headless caller, since `routes` is the host's url helpers and a job has none (§11).
     def path(routes)
       return nil if routes.nil? || !resolved?
+      # Only actor types declare a path; a tenant registration has none.
+      return nil unless registered.respond_to?(:path)
 
-      registered&.path&.call(record, routes)
+      registered.path&.call(record, routes)
     end
 
     # The stored triple, exactly as the reader returned it before this class existed. `label` here

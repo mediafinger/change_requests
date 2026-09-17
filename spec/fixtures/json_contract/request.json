@@ -1,0 +1,415 @@
+{
+  "schema_version": 1,
+  "id": "<uuid>",
+  "operation_key": "members.update_roles",
+  "operation_version": "2026-09-09",
+  "operation_label": "JsonContractProbes::Target.call",
+  "status": {
+    "key": "successful",
+    "label": "Successful",
+    "tone": "success",
+    "tooltip": null
+  },
+  "requester": {
+    "type": "Manager",
+    "id": "mgr-rita",
+    "label": "Rita",
+    "deleted": false,
+    "path": "/managers/mgr-rita"
+  },
+  "executer": {
+    "type": "Manager",
+    "id": "mgr-grace",
+    "label": "Grace Hopper",
+    "deleted": false,
+    "path": "/managers/mgr-grace"
+  },
+  "tenant": {
+    "type": "Organization",
+    "id": "<uuid>",
+    "label": "Acme",
+    "deleted": false,
+    "path": null
+  },
+  "payload": {
+    "roles": [
+      "editor"
+    ],
+    "member_id": "42"
+  },
+  "payload_preview": [
+    {
+      "key": "member_id",
+      "label": "Member",
+      "value": "Member 42"
+    },
+    {
+      "key": "roles",
+      "label": "Roles",
+      "value": [
+        "editor"
+      ]
+    }
+  ],
+  "payload_fields": [
+    {
+      "key": "member_id",
+      "label": "Member",
+      "value": "Member 42"
+    },
+    {
+      "key": "roles",
+      "label": "Roles",
+      "value": [
+        "editor"
+      ]
+    }
+  ],
+  "stages": [
+    {
+      "name": "operational",
+      "label": "Operational",
+      "position": 1,
+      "status": "closed",
+      "satisfied": true,
+      "current": false,
+      "satisfied_by": "any_quorum",
+      "satisfied_via": "owners",
+      "remaining_options": [],
+      "quorums": [
+        {
+          "name": "admins",
+          "label": "Admins",
+          "required": 1,
+          "approved": 0,
+          "satisfied": false,
+          "approvers": []
+        },
+        {
+          "name": "owners",
+          "label": "Owners",
+          "required": 2,
+          "approved": 2,
+          "satisfied": true,
+          "approvers": [
+            "Grace Hopper",
+            "Edith Clarke"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sign_off",
+      "label": "Sign off",
+      "position": 2,
+      "status": "closed",
+      "satisfied": true,
+      "current": false,
+      "satisfied_by": "any_quorum",
+      "satisfied_via": null,
+      "remaining_options": [],
+      "quorums": [
+        {
+          "name": null,
+          "label": "Sign off",
+          "required": 1,
+          "approved": 1,
+          "satisfied": true,
+          "approvers": [
+            "Dora"
+          ]
+        }
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "name": "approve",
+      "label": "Approve",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/approve",
+      "confirm": null,
+      "tone": "primary",
+      "requires_reason": false
+    },
+    {
+      "name": "unapprove",
+      "label": "Take back approval",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/unapprove",
+      "confirm": null,
+      "tone": "neutral",
+      "requires_reason": false
+    },
+    {
+      "name": "reject",
+      "label": "Reject",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/reject",
+      "confirm": null,
+      "tone": "danger",
+      "requires_reason": true
+    },
+    {
+      "name": "execute",
+      "label": "Execute",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/execute",
+      "confirm": null,
+      "tone": "primary",
+      "requires_reason": false
+    },
+    {
+      "name": "execute_override",
+      "label": "Execute without approval",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/execute",
+      "confirm": "This bypasses 0 required approvals. Continue?",
+      "tone": "danger",
+      "requires_reason": true
+    },
+    {
+      "name": "cancel",
+      "label": "Cancel request",
+      "enabled": false,
+      "reason": "This request is already finished.",
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/cancel",
+      "confirm": null,
+      "tone": "warning",
+      "requires_reason": true
+    },
+    {
+      "name": "comment",
+      "label": "Comment",
+      "enabled": true,
+      "reason": null,
+      "method": "post",
+      "path": "/change_requests/requests/<uuid>/comment",
+      "confirm": null,
+      "tone": "neutral",
+      "requires_reason": false
+    }
+  ],
+  "timeline": [
+    {
+      "kind": "requested",
+      "label": "Requested",
+      "body": null,
+      "detail": null,
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-rita",
+        "label": "Rita",
+        "deleted": false,
+        "path": "/managers/mgr-rita"
+      },
+      "metadata": {},
+      "occurred_at": "2026-09-09T10:00:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "approved",
+      "label": "Approved",
+      "body": null,
+      "detail": null,
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-grace",
+        "label": "Grace Hopper",
+        "deleted": false,
+        "path": "/managers/mgr-grace"
+      },
+      "metadata": {
+        "stage": "operational",
+        "quorums": [
+          "owners"
+        ]
+      },
+      "occurred_at": "2026-09-09T10:01:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "commented",
+      "label": "Commented",
+      "body": "Please hurry",
+      "detail": null,
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-rita",
+        "label": "Rita",
+        "deleted": false,
+        "path": "/managers/mgr-rita"
+      },
+      "metadata": {},
+      "occurred_at": "2026-09-09T10:02:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "approved",
+      "label": "Approved",
+      "body": null,
+      "detail": null,
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-edith",
+        "label": "Edith Clarke",
+        "deleted": false,
+        "path": "/managers/mgr-edith"
+      },
+      "metadata": {
+        "stage": "operational",
+        "quorums": [
+          "owners"
+        ]
+      },
+      "occurred_at": "2026-09-09T10:03:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "quorum_satisfied",
+      "label": "Quorum met",
+      "body": null,
+      "detail": "Owners",
+      "actor": {
+        "type": "System",
+        "id": "system",
+        "label": "System",
+        "deleted": false,
+        "path": null
+      },
+      "metadata": {
+        "stage": "operational",
+        "quorum": "owners"
+      },
+      "occurred_at": "2026-09-09T10:03:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "stage_satisfied",
+      "label": "Stage approved",
+      "body": null,
+      "detail": "Owners",
+      "actor": {
+        "type": "System",
+        "id": "system",
+        "label": "System",
+        "deleted": false,
+        "path": null
+      },
+      "metadata": {
+        "stage": "operational",
+        "quorum": "owners"
+      },
+      "occurred_at": "2026-09-09T10:03:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "approved",
+      "label": "Approved",
+      "body": null,
+      "detail": null,
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-dora",
+        "label": "Dora",
+        "deleted": false,
+        "path": "/managers/mgr-dora"
+      },
+      "metadata": {
+        "stage": "sign_off"
+      },
+      "occurred_at": "2026-09-09T10:04:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "quorum_satisfied",
+      "label": "Quorum met",
+      "body": null,
+      "detail": "Sign off",
+      "actor": {
+        "type": "System",
+        "id": "system",
+        "label": "System",
+        "deleted": false,
+        "path": null
+      },
+      "metadata": {
+        "stage": "sign_off"
+      },
+      "occurred_at": "2026-09-09T10:04:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "stage_satisfied",
+      "label": "Stage approved",
+      "body": null,
+      "detail": "Sign off",
+      "actor": {
+        "type": "System",
+        "id": "system",
+        "label": "System",
+        "deleted": false,
+        "path": null
+      },
+      "metadata": {
+        "stage": "sign_off"
+      },
+      "occurred_at": "2026-09-09T10:04:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "execution_started",
+      "label": "Execution started",
+      "body": null,
+      "detail": "Attempt 1",
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-grace",
+        "label": "Grace Hopper",
+        "deleted": false,
+        "path": "/managers/mgr-grace"
+      },
+      "metadata": {
+        "attempt": 1
+      },
+      "occurred_at": "2026-09-09T10:05:00Z",
+      "operation_version": "2026-09-09"
+    },
+    {
+      "kind": "executed",
+      "label": "Executed",
+      "body": null,
+      "detail": "Attempt 1",
+      "actor": {
+        "type": "Manager",
+        "id": "mgr-grace",
+        "label": "Grace Hopper",
+        "deleted": false,
+        "path": "/managers/mgr-grace"
+      },
+      "metadata": {
+        "attempt": 1
+      },
+      "occurred_at": "2026-09-09T10:05:00Z",
+      "operation_version": "2026-09-09"
+    }
+  ],
+  "created_at": "2026-09-09T10:00:00Z",
+  "expires_at": "2026-09-16T10:00:00Z",
+  "executed_at": "2026-09-09T10:05:00Z",
+  "overridden_at": null,
+  "attempts": 1,
+  "max_attempts": 1,
+  "retryable": false
+}

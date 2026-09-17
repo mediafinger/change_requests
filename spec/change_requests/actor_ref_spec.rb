@@ -199,6 +199,15 @@ RSpec.describe ChangeRequests::ActorRef do
       expect(gone.path(routes)).to be_nil
     end
 
+    # Regression: TenantType declares no `path`, so a tenant ref raised NoMethodError. Found by M5-7's
+    # as_json, the first caller to ask a tenant for one.
+    it "is nil for a tenant, whose registration has no path" do
+      organization = Organization.create!(name: "Acme")
+      tenant = described_class.new(type: "Organization", id: organization.id, label: "Acme")
+
+      expect(tenant.path(routes)).to be_nil
+    end
+
     it "is nil when the type declares no path" do
       ChangeRequests.config.actor_types["Admin"].path = nil
 
