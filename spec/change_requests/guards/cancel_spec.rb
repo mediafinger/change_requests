@@ -49,6 +49,20 @@ RSpec.describe ChangeRequests::Guards::Cancel do
         .to eq(:not_permitted)
     end
 
+    # M5-8: someone who already approved keeps their standing. Their quorum being satisfied does not
+    # make them any less one of this request's approvers.
+    it "allows an approver whose quorum is already satisfied" do
+      ChangeRequests.operations["members.update_roles"].workflow do |w|
+        w.stage :approval, satisfied_by: :all_quorums do |q|
+          q.quorum :admins, permissions: %w(member_admin), threshold: 1
+          q.quorum :owners, permissions: %w(owner), threshold: 2
+        end
+      end
+      ChangeRequests::Commands::Approve.call(request: change_request, actor: actor)
+
+      expect(described_class.new(request: change_request.reload, actor: actor)).to be_allowed
+    end
+
     it "refuses an actor class that may not approve (§9.1)" do
       ChangeRequests.config.actor_types.fetch("Admin").may_approve = false
 
@@ -57,12 +71,63 @@ RSpec.describe ChangeRequests::Guards::Cancel do
   end
 
   describe "when it is permitted (§7.2)" do
-    %w(pending approved failed).each do |status|
-      it "allows a request that is #{status}" do
-        change_request.update!(status: status)
+    it "allows a pending request" do
+      expect(guard).to be_allowed
+    end
+
+    # M5-8: once the last stage has closed the workflow is done, and the decision belongs to Execute and
+    # Expire - except for a failed run, which is worth calling off.
+    context "once the last stage has closed" do
+      before { change_request.stages.update_all(status: "closed") }
+
+      it "refuses an approved request with :approval_complete" do
+        change_request.update!(status: "approved")
+
+        expect(guard.reason).to eq(:approval_complete)
+      end
+
+      it "still allows a failed one" do
+        change_request.update!(status: "failed")
 
         expect(guard).to be_allowed
       end
+
+      it "refuses the requester too" do
+        change_request.update!(status: "approved")
+
+        expect(described_class.new(request: change_request, actor: requester).reason).to eq(:approval_complete)
+      end
+
+      it "refuses even an undeclared operation, whose cancel is otherwise anyone's (§5.11)" do
+        change_request.update!(status: "approved")
+        ChangeRequests.operations.clear
+
+        expect(described_class.new(request: change_request, actor: Admin.create!(name: "Sam")).reason)
+          .to eq(:approval_complete)
+      end
+
+      it "prefers :executing" do
+        change_request.update!(status: "executing")
+
+        expect(guard.reason).to eq(:executing)
+      end
+    end
+
+    # Read from the stage row, not the status: M9b's cooldown leaves a satisfied stage open for a while.
+    it "allows an approved request whose last stage has not closed" do
+      change_request.update!(status: "approved")
+
+      expect(guard).to be_allowed
+    end
+
+    it "allows a pending request whose earlier stages have closed, to an approver of any of them" do
+      sign_off = change_request.stages.create!(position: 2, name: "sign_off")
+      sign_off.quorums.create!(position: 1, threshold: 1).permissions.create!(permission: "director")
+      change_request.stages.find_by!(position: 1).update!(status: "closed")
+      change_request.update!(current_stage_position: 2)
+
+      expect([guard.allowed?, described_class.new(request: change_request, actor: requester).allowed?])
+        .to eq([true, true])
     end
 
     ChangeRequests::Request::FINAL_STATUSES.each do |status|

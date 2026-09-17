@@ -30,7 +30,7 @@ module GuardMatrix
   BY_STATUS = {
     "pending" => %i(allowed not_the_approver allowed allowed allowed
                     not_approved not_expired not_executing),
-    "approved" => %i(not_pending not_pending not_pending allowed allowed
+    "approved" => %i(not_pending not_pending not_pending approval_complete allowed
                      allowed not_expired not_executing),
     "executing" => %i(not_pending not_pending not_pending executing allowed
                       executing not_expirable not_stuck),
@@ -59,10 +59,12 @@ RSpec.describe ChangeRequests::Guards do
     end
   end
 
+  # A request only gets past `pending` by closing its stages, so those rows say so (M5-8 reads them).
   def build(status)
     change_request = ChangeRequests::Commands::Create.call(operation_key: "members.update_roles",
                                                            requester: requester)
     change_request.update_columns(status: status)
+    change_request.stages.update_all(status: "closed") if %w(approved executing failed successful).include?(status)
 
     change_request.reload
   end

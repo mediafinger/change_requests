@@ -89,7 +89,8 @@ config.authorization = ->(actor:, request:, stage:, action:) { … }
 ```
 
 - **`action` is always `:approve`.** The policy answers *eligibility* — may this actor decide on this
-  stage — and that is the same question whether the command asking is Approve, Reject, Cancel or Comment.
+  stage — and that is the same question whether the command asking is Approve, Reject or Cancel. Comment
+  never asks: any registered actor may comment.
   A `reject?` method on your policy is never called.
 - **It receives the stage, not a quorum.** A host policy is written against requests, so it is
   **stage-granular**: return `true` and the actor is eligible for *every* quorum of that stage. On an

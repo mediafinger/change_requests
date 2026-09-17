@@ -6,7 +6,7 @@ Enforce approval workflows on any guarded action in your Rails app.
 
 ChangeRequests puts an approval gate in front of any action in your Rails application. Instead of running a guarded operation immediately, you record it as a change request — the service class, the method, and its arguments — and it stays pending until one ore more other actors approve. Nothing executes until someone other than the requester has signed off.
 
-Each request moves through a guarded lifecycle: pending, approved, successful or failed, with cancellation and comments available at any point before it reaches a final state. Every transition is a small command object that validates the actor's permissions and the current status before touching the record, so invalid transitions raise rather than silently succeed. Failed requests keep their approval and can be retried.
+Each request moves through a guarded lifecycle: pending, approved, successful or failed, with comments at any point and cancellation until it is fully approved (or after a failed execution). Every transition is a small command object that validates the actor's permissions and the current status before touching the record, so invalid transitions raise rather than silently succeed. Failed requests keep their approval and can be retried.
 
 The engine makes no assumptions about your user model. You tell it which controller methods return the current actor and their permissions, choose which routes to mount, and it stays out of the way of the rest of your app. Reference views ship with it for a working approvals screen, and every one of them can be replaced or overridden without forking the gem.
 
