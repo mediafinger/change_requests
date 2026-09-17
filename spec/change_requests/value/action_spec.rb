@@ -8,13 +8,13 @@ RSpec.describe ChangeRequests::Value::Action do
   end
 
   it "falls back to humanize with no locale entry" do
-    expect(described_class.new(name: :execute_override, enabled: true).label).to eq("Execute override")
+    expect(described_class.new(name: :request_changes, enabled: true).label).to eq("Request changes")
   end
 
   it "translates under change_requests.actions" do
-    with_translations("change_requests.actions.execute_override" => "Execute without approval")
+    with_translations("change_requests.actions.request_changes" => "Send back")
 
-    expect(described_class.new(name: :execute_override, enabled: true).label).to eq("Execute without approval")
+    expect(described_class.new(name: :request_changes, enabled: true).label).to eq("Send back")
   end
 
   it "defaults to a neutral POST with nothing to confirm, no path and no reason" do

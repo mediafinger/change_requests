@@ -22,6 +22,18 @@ module ChangeRequests
 
     CANCELING_KINDS = %w(canceled operation_undeclared).freeze
 
+    # One per transition a host can offer, in display order (§7, §8.1). `route` is the member path the
+    # engine draws; an override posts to Execute's.
+    ACTIONS = {
+      approve: { guard: Guards::Approve, tone: :primary },
+      unapprove: { guard: Guards::Unapprove, tone: :neutral },
+      reject: { guard: Guards::Reject, tone: :danger, requires_reason: true },
+      execute: { guard: Guards::Execute, tone: :primary },
+      execute_override: { guard: Guards::Execute, options: { override: true }, tone: :danger, route: :execute },
+      cancel: { guard: Guards::Cancel, tone: :warning, requires_reason: true },
+      comment: { guard: Guards::Comment, tone: :neutral },
+    }.freeze
+
     attr_reader :request, :actor, :routes
 
     def initialize(request, actor:, routes: nil, resolve_actors: true)
@@ -93,7 +105,73 @@ module ChangeRequests
       end
     end
 
+    # §7: each enabled flag and reason is the guard's own answer, so the button and the command agree.
+    # Empty with no actor, since every guard asks who is acting.
+    def actions
+      @actions ||= actor.nil? ? [] : ACTIONS.keys.filter_map { |name| action(name) }
+    end
+
+    # Built once per page and shared: the presenter's actions and anything else asking the same question.
+    # Nil for an override the operation does not declare.
+    def guard(name)
+      guards.fetch(name) do
+        spec = ACTIONS.fetch(name)
+
+        guards[name] = (spec[:guard].new(request: request, actor: actor, **spec.fetch(:options, {})) if offered?(name))
+      end
+    end
+
     private
+
+    def guards
+      @guards ||= {}
+    end
+
+    def offered?(name)
+      name != :execute_override || operation&.overridable?
+    end
+
+    def operation
+      ChangeRequests.operations[request.operation_key]
+    end
+
+    def action(name)
+      checked = guard(name)
+
+      return if checked.nil?
+
+      spec = ACTIONS.fetch(name)
+
+      Value::Action.new(name: name, enabled: checked.allowed?, reason: checked.message, tone: spec[:tone],
+                        path: action_path(spec.fetch(:route, name)), confirm: confirmation(name),
+                        requires_reason: requires_reason?(name, spec))
+    end
+
+    def requires_reason?(name, spec)
+      return operation.override_policy.require_reason? if name == :execute_override
+
+      spec.fetch(:requires_reason, false)
+    end
+
+    # Nil with no routes, and for a route the host did not draw (M6a-2).
+    def action_path(route)
+      helper = :"#{route}_request_path"
+
+      routes.public_send(helper, request) if routes.respond_to?(helper)
+    end
+
+    # §8.1: an override is always confirmed, naming what it bypasses.
+    def confirmation(name)
+      return unless name == :execute_override
+
+      shortfall = request.approval_shortfall
+      missing = shortfall[:approvals_required] - shortfall[:approvals_present]
+      plural = missing == 1 ? "one" : "other"
+      default = "This bypasses %{count} required approval#{"s" unless missing == 1}. Continue?"
+
+      Translation.translate("change_requests.confirmations.execute_override.#{plural}", default: default,
+                                                                                         count: missing)
+    end
 
     PROGRESS = {
       stages: { quorums: [:permissions, :eligible_actors, { approval_quorums: :approval }] },

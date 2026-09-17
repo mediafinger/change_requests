@@ -401,6 +401,24 @@ RSpec.describe ChangeRequests::Request do
     end
   end
 
+  # §8.1's shortfall, read by the `overridden` event and by the override button's confirmation (M5-4).
+  # Commands::Override's spec covers its cases end to end.
+  describe "#approval_shortfall" do
+    it "counts what the open stages still need, and what has landed toward it" do
+      stage = request.stages.create!(position: 1, name: "operational", satisfied_by: "all_quorums")
+      stage.quorums.create!(position: 1, name: "admins", threshold: 1, status: "satisfied")
+      owners = stage.quorums.create!(position: 2, name: "owners", threshold: 2)
+      approval = stage.approvals.create!(change_request: request, approver_type: "User", approver_id: "7",
+                                         approver_label: "Olga", decision: "approved", decided_at: Time.current)
+      owners.approval_quorums.create!(approval: approval)
+      request.stages.create!(position: 2, name: "done", status: "closed")
+
+      expect(request.reload.approval_shortfall).to eq(approvals_present: 1, approvals_required: 2,
+                                                      incomplete_stages: %w(operational),
+                                                      incomplete_quorums: %w(owners))
+    end
+  end
+
   # The attempts rows *are* the count; there is no counter column (§19.12). It answers "is there an
   # attempt left", not "may this be executed" - Guards::Execute combines it with the status.
   describe "#retryable?" do

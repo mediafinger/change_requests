@@ -108,5 +108,20 @@ module ChangeRequests
     def retryable?
       attempts.count < max_attempts
     end
+
+    # §8.1: how far short of approval this request is, scoped to what is still missing. The `overridden`
+    # event snapshots it at claim time; the override button's confirmation reads it live.
+    def approval_shortfall
+      open_stages = stages.reject { |stage| stage.satisfied? || stage.closed? }
+      quorums     = open_stages.flat_map { |stage| stage.quorums.reject(&:satisfied?) }
+
+      {
+        approvals_present: quorums.sum { |quorum| quorum.approval_quorums.size },
+        approvals_required: quorums.sum(&:threshold),
+        incomplete_stages: open_stages.map(&:name),
+        # Omitted rather than null for a single-quorum stage, as every other event does (§5.9).
+        incomplete_quorums: quorums.filter_map(&:name),
+      }
+    end
   end
 end

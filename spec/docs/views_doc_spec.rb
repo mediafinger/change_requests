@@ -5,13 +5,19 @@ require "rails_helper"
 RSpec.describe "docs/06_views_and_theming.md" do # rubocop:disable RSpec/DescribeClass
   let(:document) { File.read(File.expand_path("../../docs/06_views_and_theming.md", __dir__)) }
 
-  # Rows of the Status table: | `status` | `tone` | tooltip |
-  let(:documented_tones) do
-    document.scan(/^\| `(\w+)`\s+\| `(\w+)`\s+\|/).to_h { |status, tone| [status.to_sym, tone.to_sym] }
+  # Rows of a section's table whose first two cells are `name` | `tone`.
+  def tones_in(heading)
+    section = document[/^### #{heading}\n(.*?)(?=^##)/m, 1]
+
+    section.scan(/^\| `(\w+)`\s+\| `(\w+)`\s+\|/).to_h { |name, tone| [name.to_sym, tone.to_sym] }
   end
 
   it "documents every status with the tone the presenter gives it" do
-    expect(documented_tones).to eq(ChangeRequests::RequestPresenter::STATUS_TONES)
+    expect(tones_in("Status")).to eq(ChangeRequests::RequestPresenter::STATUS_TONES)
+  end
+
+  it "documents every action with the tone the presenter gives it" do
+    expect(tones_in("Actions")).to eq(ChangeRequests::RequestPresenter::ACTIONS.transform_values { |spec| spec[:tone] })
   end
 
   it "names the closed tone set" do

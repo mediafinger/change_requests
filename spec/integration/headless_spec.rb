@@ -42,6 +42,14 @@ RSpec.describe "the domain core, headless" do
                                'presenter_preview=Member=7,Roles=["editor"]')
     end
 
+    # Grace approved an approved request: she may execute it. Cancel and Comment ask for a pending quorum
+    # she qualifies for, and the only one is satisfied.
+    it "presents actions from the guards, with no routes and no locale file" do
+      expect(probe).to include("presenter_actions=approve=false,unapprove=false,reject=false,execute=true," \
+                               "cancel=false,comment=false",
+                               "presenter_refusal=not_pending")
+    end
+
     it "presents stage progress from the approval rows" do
       expect(probe).to include("presenter_stages=Approval:closed:Grace Hopper+Edith Clarke")
     end

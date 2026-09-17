@@ -5,6 +5,8 @@
 module Translations
   def with_translations(flat)
     @translations_stored = true
+    # Load the locale files first: a lazy load on the next lookup would overwrite a key en.yml also defines.
+    I18n.backend.send(:init_translations) unless I18n.backend.initialized?
 
     flat.each do |key, value|
       nested = key.to_s.split(".").reverse.reduce(value) { |memo, part| { part.to_sym => memo } }
