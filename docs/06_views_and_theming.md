@@ -24,8 +24,7 @@ p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: n
 | `actions`           | `[Value::Action]`, one per transition the acting actor could be offered   |
 | `guard(name)`       | the `Guards::*` object behind an action, built once per presenter        |
 | `timeline`          | `[Value::TimelineEntry]`, one per event, oldest first                    |
-
-`as_json` arrives with the rest of M5.
+| `as_json`           | every value above as a Hash: the JSON contract below                     |
 
 A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
 declaration.
@@ -177,6 +176,172 @@ Value::TimelineEntry(kind: :overridden, label: "Executed without approval", acto
 - `operation_version` is stamped per event from the live declaration, so a declaration that changed
   mid-request shows as two versions on one timeline.
 - Actors resolve together, one query per actor class, or not at all with `resolve_actors: false`.
+
+## The JSON contract
+
+`RequestPresenter#as_json` is public API. Any front end that is not these views, whether Hotwire, React, a
+mobile app or another service, targets it.
+
+```ruby
+render json: ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: change_requests)
+```
+
+<!-- contract: example -->
+```json
+{
+  "schema_version": 1,
+  "id": "8f14e45f-9a0b-4c7e-9e2a-1d3b5c7e9f10",
+  "operation_key": "members.update_roles",
+  "operation_version": "2026-09-09",
+  "operation_label": "Members::UpdateRoles.call",
+  "status": { "key": "failed", "label": "Failed", "tone": "danger", "tooltip": "Timeout calling provider" },
+  "requester": { "type": "Admin", "id": "42", "label": "Ada Lovelace", "deleted": false, "path": "/admin/users/42" },
+  "executer": { "type": "Admin", "id": "7", "label": "Edith Clarke (admin)", "deleted": false, "path": null },
+  "tenant": { "type": "Organization", "id": "5d2c…", "label": "Acme", "deleted": false, "path": null },
+  "payload": { "member_id": "42", "roles": ["editor"] },
+  "payload_preview": [{ "key": "member_id", "label": "Member", "value": "Ada Lovelace" }],
+  "payload_fields": [
+    { "key": "member_id", "label": "Member", "value": "Ada Lovelace" },
+    { "key": "roles", "label": "Roles", "value": ["editor"] }
+  ],
+  "stages": [
+    {
+      "name": "operational", "label": "Operational review", "position": 1, "status": "closed",
+      "satisfied": true, "current": false, "satisfied_by": "any_quorum", "satisfied_via": "owners",
+      "remaining_options": [],
+      "quorums": [
+        { "name": "owners", "label": "Owners", "required": 2, "approved": 2, "satisfied": true,
+          "approvers": ["Grace Hopper", "Edith Clarke"] }
+      ]
+    }
+  ],
+  "actions": [
+    { "name": "execute", "label": "Execute", "enabled": false,
+      "reason": "This request has used all of its attempts.", "method": "post",
+      "path": "/change_requests/requests/8f14e45f-…/execute", "confirm": null, "tone": "primary",
+      "requires_reason": false }
+  ],
+  "timeline": [
+    { "kind": "requested", "label": "Requested", "body": null, "detail": null,
+      "actor": { "type": "Admin", "id": "42", "label": "Ada Lovelace", "deleted": false, "path": null },
+      "metadata": {}, "occurred_at": "2026-09-09T10:03:41Z", "operation_version": "2026-09-09" }
+  ],
+  "created_at": "2026-09-09T10:03:41Z",
+  "expires_at": "2026-09-16T10:03:41Z",
+  "executed_at": "2026-09-09T11:15:02Z",
+  "overridden_at": null,
+  "attempts": 1,
+  "max_attempts": 1,
+  "retryable": false
+}
+```
+
+Every key, and the JSON type of its value. `[]` descends into each element of an array. A spec holds this
+table and the example above to what `as_json` produces.
+
+<!-- contract: keys -->
+| Key                                   | Type             |
+|---------------------------------------|------------------|
+| `schema_version`                      | integer          |
+| `id`                                  | string           |
+| `operation_key`                       | string           |
+| `operation_version`                   | string           |
+| `operation_label`                     | string           |
+| `status`                              | object           |
+| `status.key`                          | string           |
+| `status.label`                        | string           |
+| `status.tone`                         | string           |
+| `status.tooltip`                      | string, null     |
+| `requester`                           | object           |
+| `requester.type`                      | string           |
+| `requester.id`                        | string           |
+| `requester.label`                     | string           |
+| `requester.deleted`                   | boolean          |
+| `requester.path`                      | string, null     |
+| `executer`                            | object, null     |
+| `executer.type`                       | string           |
+| `executer.id`                         | string           |
+| `executer.label`                      | string           |
+| `executer.deleted`                    | boolean          |
+| `executer.path`                       | string, null     |
+| `tenant`                              | object, null     |
+| `tenant.type`                         | string           |
+| `tenant.id`                           | string           |
+| `tenant.label`                        | string           |
+| `tenant.deleted`                      | boolean          |
+| `tenant.path`                         | string, null     |
+| `payload`                             | object           |
+| `payload_preview`                     | array            |
+| `payload_preview[].key`               | string           |
+| `payload_preview[].label`             | string           |
+| `payload_preview[].value`             | any              |
+| `payload_fields`                      | array            |
+| `payload_fields[].key`                | string           |
+| `payload_fields[].label`              | string           |
+| `payload_fields[].value`              | any              |
+| `stages`                              | array            |
+| `stages[].name`                       | string           |
+| `stages[].label`                      | string           |
+| `stages[].position`                   | integer          |
+| `stages[].status`                     | string           |
+| `stages[].satisfied`                  | boolean          |
+| `stages[].current`                    | boolean          |
+| `stages[].satisfied_by`               | string           |
+| `stages[].satisfied_via`              | string, null     |
+| `stages[].remaining_options`          | array            |
+| `stages[].quorums`                    | array            |
+| `stages[].quorums[].name`             | string, null     |
+| `stages[].quorums[].label`            | string           |
+| `stages[].quorums[].required`         | integer          |
+| `stages[].quorums[].approved`         | integer          |
+| `stages[].quorums[].satisfied`        | boolean          |
+| `stages[].quorums[].approvers`        | array            |
+| `actions`                             | array            |
+| `actions[].name`                      | string           |
+| `actions[].label`                     | string           |
+| `actions[].enabled`                   | boolean          |
+| `actions[].reason`                    | string, null     |
+| `actions[].method`                    | string           |
+| `actions[].path`                      | string, null     |
+| `actions[].confirm`                   | string, null     |
+| `actions[].tone`                      | string           |
+| `actions[].requires_reason`           | boolean          |
+| `timeline`                            | array            |
+| `timeline[].kind`                     | string           |
+| `timeline[].label`                    | string           |
+| `timeline[].body`                     | string, null     |
+| `timeline[].detail`                   | string, null     |
+| `timeline[].actor`                    | object           |
+| `timeline[].actor.type`               | string           |
+| `timeline[].actor.id`                 | string           |
+| `timeline[].actor.label`              | string           |
+| `timeline[].actor.deleted`            | boolean          |
+| `timeline[].actor.path`               | string, null     |
+| `timeline[].metadata`                 | object           |
+| `timeline[].occurred_at`              | string           |
+| `timeline[].operation_version`        | string           |
+| `created_at`                          | string           |
+| `expires_at`                          | string, null     |
+| `executed_at`                         | string, null     |
+| `overridden_at`                       | string, null     |
+| `attempts`                            | integer          |
+| `max_attempts`                        | integer          |
+| `retryable`                           | boolean          |
+
+- **Ids are strings**, the request's own uuid included.
+- **Timestamps are ISO8601 in UTC with a `Z`**, or `null`. Formatting them is the front end's decision.
+- **Enums are strings**: `status.key`, `status.tone`, `stages[].status`, `stages[].satisfied_by`,
+  `actions[].name`, `actions[].method`, `actions[].tone` and `timeline[].kind`.
+- **Labels are already translated.** Render them; do not look them up.
+- **Absent is `null`, never omitted.** Every key in the table is present on every response. The one
+  exception is the children of `executer` and `tenant`, which are there whenever their parent is an object.
+- `payload` and `timeline[].metadata` are stored objects, passed through verbatim. `payload_fields` is the
+  labelled, alphabetised view of `payload`.
+- `path` is `null` without `routes:`.
+
+**Versioning.** `schema_version` is `1`. Adding a key does not change it. Removing a key, renaming one, or
+changing a value's type does. A golden-file spec renders one fixture request, so any such change shows up
+as a diff in review.
 
 ## Labels and translations
 
