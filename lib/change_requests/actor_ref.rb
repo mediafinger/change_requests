@@ -27,8 +27,9 @@ module ChangeRequests
       @id        = id&.to_s
       @snapshot  = columns[:label]
       @identity  = columns[:identity]
-      @resolving = resolve
-      @record    = resolve ? record : nil
+      # The System sentinel is nobody's class: nothing to find, so nothing deleted (M5-5).
+      @resolving = resolve && @type != SYSTEM_ACTOR[:type]
+      @record    = @resolving ? record : nil
 
       # Only the keys this reference actually carries, so `to_h` is what the reader returned before
       # ActorRef existed: an eligibility row has no label, and only two references have an identity.
@@ -65,6 +66,10 @@ module ChangeRequests
 
     def resolving?
       @resolving
+    end
+
+    def system?
+      type == SYSTEM_ACTOR[:type]
     end
 
     def resolve_with(record)
