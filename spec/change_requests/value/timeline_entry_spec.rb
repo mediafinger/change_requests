@@ -17,7 +17,7 @@ RSpec.describe ChangeRequests::Value::TimelineEntry do
   end
 
   it "falls back to humanize with no locale entry" do
-    expect(described_class.new(**attributes, kind: :quorum_satisfied).label).to eq("Quorum satisfied")
+    expect(described_class.new(**attributes, kind: :escalated).label).to eq("Escalated")
   end
 
   # Not change_requests.events: that key already holds the body the gem writes for its own events.

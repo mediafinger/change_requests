@@ -105,6 +105,19 @@ module ChangeRequests
       end
     end
 
+    # §11, §5.5. One entry per event row in `occurred_at` order, the actors resolved together - or not at
+    # all with resolve_actors: false. System entries need no branch: the sentinel is never deleted.
+    def timeline
+      @timeline ||= begin
+        events = request.events.to_a
+        refs = events.map(&:actor)
+
+        resolve_actors? ? ActorResolver.call(refs) : refs.map!(&:without_resolution)
+
+        events.zip(refs).map { |event, ref| timeline_entry(event, ref) }
+      end
+    end
+
     # §7: each enabled flag and reason is the guard's own answer, so the button and the command agree.
     # Empty with no actor, since every guard asks who is acting.
     def actions
@@ -125,6 +138,49 @@ module ChangeRequests
 
     def guards
       @guards ||= {}
+    end
+
+    def timeline_entry(event, actor_ref)
+      Value::TimelineEntry.new(kind: event.kind.to_sym, actor: actor_ref, body: event.body,
+                               detail: timeline_detail(event), metadata: event.metadata || {},
+                               occurred_at: event.occurred_at, operation_version: event.operation_version)
+    end
+
+    def timeline_detail(event)
+      metadata = event.metadata || {}
+
+      case event.kind
+      when "quorum_satisfied", "stage_satisfied" then satisfied_detail(metadata)
+      when "overridden" then overridden_detail(metadata)
+      when "reaped" then reaped_detail(metadata)
+      when "execution_started", "executed", "execution_failed" then attempt_detail(metadata)
+      end
+    end
+
+    # The quorum's label, or the stage's for a nameless quorum - which is what the metadata omits (§5.9).
+    def satisfied_detail(metadata)
+      return Value.label(:quorums, metadata["quorum"]) if metadata["quorum"].present?
+
+      Value.label(:stages, metadata["stage"]) if metadata["stage"].present?
+    end
+
+    def overridden_detail(metadata)
+      detail(:shortfall, "%{present} of %{required} approvals", present: metadata["approvals_present"],
+                                                                 required: metadata["approvals_required"])
+    end
+
+    def reaped_detail(metadata)
+      stuck_for = ActiveSupport::Duration.build(metadata["stuck_for"].to_i).inspect
+
+      detail(:reaped, "Attempt %{attempt}, stuck for %{stuck_for}", attempt: metadata["attempt"], stuck_for: stuck_for)
+    end
+
+    def attempt_detail(metadata)
+      detail(:attempt, "Attempt %{attempt}", attempt: metadata["attempt"]) if metadata["attempt"]
+    end
+
+    def detail(key, default, **values)
+      Translation.translate("change_requests.timeline_details.#{key}", default: default, **values)
     end
 
     def offered?(name)

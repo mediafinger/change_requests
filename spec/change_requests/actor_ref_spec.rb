@@ -261,9 +261,22 @@ RSpec.describe ChangeRequests::ActorRef do
       expect(system).to have_attributes(type: "System", id: "system", label: "System")
     end
 
-    it "resolves to nothing, System being nobody's class" do
-      expect(system.record).to be_nil
-      expect(system).to be_deleted
+    # M5-5: a timeline renders expiry and the reaper with no branch on the actor. System is nobody's
+    # class, so there is nothing to look up and nothing that could have been deleted.
+    it "never resolves and is never deleted" do
+      expect { expect([system.record, system.deleted?, system.path(Object.new)]).to eq([nil, false, nil]) }
+        .to issue_no_queries
+    end
+
+    it "is not resolving, so a batch skips it" do
+      refs = [system]
+
+      expect(system).not_to be_resolving
+      expect { ChangeRequests::ActorResolver.call(refs) }.to issue_no_queries
+    end
+
+    it "answers system?" do
+      expect([system.system?, ref.system?]).to eq([true, false])
     end
 
     it "round-trips the constant" do

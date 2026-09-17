@@ -138,6 +138,9 @@ report :presenter_preview, presenter.payload_preview.map { |field| "#{field.labe
 report :presenter_requester, presenter.requester.label
 report :presenter_actions, presenter.actions.map { |action| "#{action.name}=#{action.enabled}" }.join(",")
 report :presenter_refusal, presenter.actions.first.reason
+report :presenter_timeline, presenter.timeline.map { |row|
+  "#{row.kind}:#{row.actor.label}#{":#{row.detail}" if row.detail}"
+}.join(",")
 report :presenter_stages, presenter.stages.map { |stage|
   "#{stage.label}:#{stage.status}:#{stage.quorums.sole.approvers.join("+")}"
 }.join(",")
