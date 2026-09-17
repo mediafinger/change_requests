@@ -58,22 +58,7 @@ module ChangeRequests
       # approval must not be able to make an override look retrospectively unnecessary.
       def record_override
         request.update!(overridden_at: Time.current)
-        emit(:overridden, body: reason, metadata: shortfall)
-      end
-
-      # Scoped to what is still missing rather than to the whole workflow: what an auditor asks is
-      # how far short this request was when someone went ahead anyway.
-      def shortfall
-        stages  = request.stages.reject { |stage| stage.satisfied? || stage.closed? }
-        quorums = stages.flat_map { |stage| stage.quorums.reject(&:satisfied?) }
-
-        {
-          approvals_present: quorums.sum { |quorum| quorum.approval_quorums.count },
-          approvals_required: quorums.sum(&:threshold),
-          incomplete_stages: stages.map(&:name),
-          # Omitted rather than null for a single-quorum stage, as every other event does (§5.9).
-          incomplete_quorums: quorums.filter_map(&:name),
-        }
+        emit(:overridden, body: reason, metadata: request.approval_shortfall)
       end
 
       # §8's conditional UPDATE. The guard ran under this transaction's own FOR UPDATE, so in the
