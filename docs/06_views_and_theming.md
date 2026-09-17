@@ -21,8 +21,10 @@ p = ChangeRequests::RequestPresenter.new(request, actor: current_user, routes: n
 | `payload_fields`    | `[Value::Field(key:, label:, value:)]`, alphabetical by key              |
 | `payload_preview`   | the first `config.payload_preview_limit` of `payload_fields`             |
 | `stages`            | `[Value::StageProgress]` in position order                               |
+| `actions`           | `[Value::Action]`, one per transition the acting actor could be offered   |
+| `guard(name)`       | the `Guards::*` object behind an action, built once per presenter        |
 
-Actions, the timeline and `as_json` arrive with the rest of M5.
+The timeline and `as_json` arrive with the rest of M5.
 
 A request whose operation is no longer declared renders exactly like any other. Nothing here reads the
 declaration.
@@ -94,6 +96,34 @@ Value::StageProgress(name: "operational", label: "Operational", position: 1, sta
   `resolve_actors: false` and after an approver is deleted.
 - `current?` is the stage a pending request is waiting on. A finished request has none.
 
+### Actions
+
+```ruby
+Value::Action(name: :approve, label: "Approve", enabled: false,
+              reason: "This request is no longer open for decisions.",
+              http_method: :post, path: "/change_requests/requests/…/approve",
+              confirm: nil, tone: :primary, requires_reason: false)
+```
+
+| Action             | Tone      | Requires a reason                   | Path helper            |
+|--------------------|-----------|-------------------------------------|------------------------|
+| `approve`          | `primary` | no                                  | `approve_request_path` |
+| `unapprove`        | `neutral` | no                                  | `unapprove_request_path` |
+| `reject`           | `danger`  | yes                                 | `reject_request_path`  |
+| `execute`          | `primary` | no                                  | `execute_request_path` |
+| `execute_override` | `danger`  | `op.override(require_reason:)`      | `execute_request_path` |
+| `cancel`           | `warning` | yes                                 | `cancel_request_path`  |
+| `comment`          | `neutral` | no                                  | `comment_request_path` |
+
+- **`enabled` and `reason` come from the guard the command enforces with.** A disabled button's tooltip is
+  the exact sentence the command would raise, so the two cannot disagree.
+- **`execute_override`** is listed only when the operation declares `op.override`. It is always confirmed
+  ("This bypasses 2 required approvals. Continue?") and posts to Execute's path with `override: true`.
+- `path` is `nil` without `routes:`, and for any action whose route your `config.routes` does not draw.
+- With no `actor:`, `actions` is empty: every guard asks who is acting.
+- `guard(:approve)` returns the same object the action was computed from, for anything else on the page
+  asking the same question.
+
 ## Labels and translations
 
 Every label is looked up under `change_requests.*` and falls back to the humanized key, so nothing needs a
@@ -113,7 +143,11 @@ en:
     quorums:
       owners: "Owners"
     actions:
-      execute_override: "Execute without approval"
+      execute_override: "Execute without approval"   # the gem ships every action label
+    confirmations:
+      execute_override:
+        one: "This bypasses %{count} required approval. Continue?"
+        other: "This bypasses %{count} required approvals. Continue?"
     timeline:
       requested: "Raised"
     progress:

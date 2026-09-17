@@ -44,6 +44,21 @@ en:
       quorum_not_met: "This request does not have the approvals it needs."
       transition_error: "This request will not accept that."
 
+    # Button labels (§11). Execute's override is never labelled as Execute (§8.1).
+    actions:
+      approve: "Approve"
+      unapprove: "Take back approval"
+      reject: "Reject"
+      execute: "Execute"
+      execute_override: "Execute without approval"
+      cancel: "Cancel request"
+      comment: "Comment"
+
+    confirmations:
+      execute_override:
+        one: "This bypasses %{count} required approval. Continue?"
+        other: "This bypasses %{count} required approvals. Continue?"
+
     # Event bodies the gem writes for itself, where there is no actor to supply one. Translatable
     # rather than a hardcoded sentence, with the same fallback every other lookup has (§5.11).
     events:
